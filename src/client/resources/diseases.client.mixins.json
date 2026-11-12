@@ -3,9 +3,9 @@
   "package": "com.diseasemod.client.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
-    "ExampleClientMixin",
     "FontMixin",
-    "PlayerModelMixin"
+    "PlayerModelMixin",
+    "SoundEngineMixin"
   ],
   "injectors": {
     "defaultRequire": 1

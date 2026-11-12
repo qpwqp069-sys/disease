@@ -5,7 +5,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -19,6 +18,11 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.suggestion.Suggestions;
+import com.mojang.brigadier.suggestion.SuggestionsBuilder;
+import java.util.concurrent.CompletableFuture;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
@@ -31,6 +35,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
@@ -47,6 +52,7 @@ import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.damagesource.DamageType;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.ai.attributes.Attribute;
@@ -54,6 +60,7 @@ import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.LevelResource;
 
 public final class DiseaseManager {
@@ -75,6 +82,9 @@ public final class DiseaseManager {
     private static final Identifier DWARF_ID = Identifier.fromNamespaceAndPath(Diseases.MOD_ID, "dwarfism");
     private static final Identifier ANEMIA_ID = Identifier.fromNamespaceAndPath(Diseases.MOD_ID, "anemia");
     private static final Identifier GIANT_ID = Identifier.fromNamespaceAndPath(Diseases.MOD_ID, "gigantism");
+    private static final Identifier LIMP_ID = Identifier.fromNamespaceAndPath(Diseases.MOD_ID, "limp");
+    private static final ResourceKey<DamageType> OSTEOPOROSIS_DAMAGE = ResourceKey.create(
+            Registries.DAMAGE_TYPE, Identifier.fromNamespaceAndPath(Diseases.MOD_ID, "osteoporosis"));
 
     private DiseaseManager() {}
 
@@ -112,25 +122,35 @@ public final class DiseaseManager {
     public static void init() {
         ServerLifecycleEvents.SERVER_STARTED.register(DiseaseManager::load);
 
-        // Остеопороз: урон от падения удваивается
-        ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, baseDamageTaken, damageTaken, blocked) -> {
-            if (entity instanceof ServerPlayer sp && !blocked && damageTaken > 0f
-                    && source.is(DamageTypeTags.IS_FALL) && state(sp).has(Disease.OSTEOPOROSIS)) {
-                sp.invulnerableTime = 0;
-                sp.hurtServer((ServerLevel) sp.level(), diseaseSource(sp, "osteoporosis"), damageTaken);
+        // Остеопороз: урон от падения удваивается (даже смертельное падение даёт кастомное сообщение о смерти)
+        ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
+            if (entity instanceof ServerPlayer sp && amount > 0f
+                    && source.is(DamageTypeTags.IS_FALL)
+                    && !source.is(OSTEOPOROSIS_DAMAGE)
+                    && state(sp).has(Disease.OSTEOPOROSIS)) {
+                sp.hurtServer((ServerLevel) sp.level(), diseaseSource(sp, "osteoporosis"), amount * 2f);
+                return false;
             }
+            return true;
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(DiseaseManager::save);
         ServerTickEvents.END_SERVER_TICK.register(DiseaseManager::tick);
 
-        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> sync(handler.getPlayer()));
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            ServerPlayer p = handler.getPlayer();
+            syncAttributes(p, state(p));
+            sync(p);
+            broadcastArmless(server);
+        });
 
         ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
             PlayerState st = state(newPlayer);
             st.task = null;
             st.sprintTicks = 0;
             st.ocdCooldown = roll(OCD_MIN, OCD_MAX);
+            syncAttributes(newPlayer, st);
             sync(newPlayer);
+            broadcastArmless(((ServerLevel) newPlayer.level()).getServer());
         });
 
         // Немота: сообщения в чат блокируются
@@ -195,34 +215,53 @@ public final class DiseaseManager {
     }
 
     // ===== Выдача болезней =====
+    /** Проверяет, совместима ли болезнь с уже имеющимися у игрока (карликовость и гигантизм взаимоисключаемы). */
+    private static boolean isCompatible(PlayerState st, Disease candidate) {
+        if (candidate == Disease.DWARFISM && st.has(Disease.GIGANTISM)) {
+            return false;
+        }
+        if (candidate == Disease.GIGANTISM && st.has(Disease.DWARFISM)) {
+            return false;
+        }
+        return true;
+    }
+
+    private static List<Disease> availableDiseases(PlayerState st) {
+        List<Disease> free = new ArrayList<>();
+        for (Disease d : Disease.values()) {
+            if (!st.has(d) && isCompatible(st, d)) {
+                free.add(d);
+            }
+        }
+        return free;
+    }
+
     public static boolean grant(ServerPlayer p, Disease d) {
         PlayerState st = state(p);
-        if (!st.diseases.add(d)) {
+        if (!isCompatible(st, d) || !st.diseases.add(d)) {
             return false;
         }
         if (d == Disease.OCD) {
             st.ocdCooldown = roll(OCD_MIN, OCD_MAX);
             st.task = null;
         }
+        syncAttributes(p, st);
         p.sendSystemMessage(Component.literal("[Болезнь] ").withStyle(ChatFormatting.RED)
                 .append(Component.literal(d.title).withStyle(ChatFormatting.WHITE, ChatFormatting.BOLD))
                 .append(Component.literal(" - " + d.description).withStyle(ChatFormatting.GRAY)));
         sync(p);
+        if (d == Disease.NO_LEFT_HAND) {
+            broadcastArmless(((ServerLevel) p.level()).getServer());
+        }
         return true;
     }
 
-    private static void giveRandom(ServerPlayer p) {
-        PlayerState st = state(p);
-        List<Disease> free = new ArrayList<>();
-        for (Disease d : Disease.values()) {
-            if (!st.has(d)) {
-                free.add(d);
-            }
-        }
+    private static boolean giveRandom(ServerPlayer p) {
+        List<Disease> free = availableDiseases(state(p));
         if (free.isEmpty()) {
-            return;
+            return false;
         }
-        grant(p, free.get(ThreadLocalRandom.current().nextInt(free.size())));
+        return grant(p, free.get(ThreadLocalRandom.current().nextInt(free.size())));
     }
 
     private static void clearDiseases(ServerPlayer p) {
@@ -232,7 +271,9 @@ public final class DiseaseManager {
         st.sprintTicks = 0;
         st.exposure = 0;
         removeDiseaseEffects(p);
+        syncAttributes(p, st);
         sync(p);
+        broadcastArmless(((ServerLevel) p.level()).getServer());
     }
 
     /** Снимает эффекты, которые накладывают болезни (чтобы они не висели после лечения). */
@@ -251,11 +292,14 @@ public final class DiseaseManager {
             st.diseases.clear();
             st.task = null;
             st.sprintTicks = 0;
+            st.exposure = 0;
         }
         for (ServerPlayer p : server.getPlayerList().getPlayers()) {
             removeDiseaseEffects(p);
+            syncAttributes(p, state(p));
             sync(p);
         }
+        broadcastArmless(server);
         server.getPlayerList().broadcastSystemMessage(
                 Component.literal("Прошло 5 дней: все болезни отступили.").withStyle(ChatFormatting.GREEN), false);
     }
@@ -270,9 +314,20 @@ public final class DiseaseManager {
         for (Disease d : st.diseases) {
             ids.add(d.id);
         }
-        boolean all = st.diseases.size() >= Disease.values().length;
+        boolean all = availableDiseases(st).isEmpty();
         ServerPlayNetworking.send(p, new DiseaseSyncPayload(
                 ids, all ? -1 : Math.max(0, globalTimer), Math.max(0, RESET_TICKS - sinceReset)));
+    }
+
+    private static void syncAttributes(ServerPlayer p, PlayerState st) {
+        syncModifier(p, Attributes.SCALE, DWARF_ID, -0.25, AttributeModifier.Operation.ADD_VALUE,
+                st.has(Disease.DWARFISM));
+        syncModifier(p, Attributes.MAX_HEALTH, ANEMIA_ID, -4.0, AttributeModifier.Operation.ADD_VALUE,
+                st.has(Disease.ANEMIA));
+        syncModifier(p, Attributes.SCALE, GIANT_ID, 0.3, AttributeModifier.Operation.ADD_VALUE,
+                st.has(Disease.GIGANTISM));
+        syncModifier(p, Attributes.MOVEMENT_SPEED, LIMP_ID, -0.33, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL,
+                st.has(Disease.LIMP));
     }
 
     // ===== Эффекты болезней (серверные) =====
@@ -285,14 +340,9 @@ public final class DiseaseManager {
         if (st.has(Disease.DIABETES) && refresh) {
             p.addEffect(new MobEffectInstance(MobEffects.HUNGER, 100, 3, false, false, false));
         }
-        // Рост (карликовость) и здоровье (анемия) меняются через атрибуты
+        // Рост (карликовость/гигантизм), здоровье (анемия) и скорость (хромота) меняются через атрибуты
         if (p.tickCount % 10 == 0) {
-            syncModifier(p, Attributes.SCALE, DWARF_ID, -0.25, AttributeModifier.Operation.ADD_VALUE,
-                    st.has(Disease.DWARFISM));
-            syncModifier(p, Attributes.MAX_HEALTH, ANEMIA_ID, -4.0, AttributeModifier.Operation.ADD_VALUE,
-                    st.has(Disease.ANEMIA));
-            syncModifier(p, Attributes.SCALE, GIANT_ID, 0.3, AttributeModifier.Operation.ADD_VALUE,
-                    st.has(Disease.GIGANTISM));
+            syncAttributes(p, st);
         }
 
         // Астма: после 5 секунд бега - приступ (темнота и невозможность бежать)
@@ -433,8 +483,13 @@ public final class DiseaseManager {
             if (cured == Disease.OCD) {
                 st.task = null;
             }
+            st.exposure = 0;
             removeDiseaseEffects(p);
+            syncAttributes(p, st);
             sync(p);
+            if (cured == Disease.NO_LEFT_HAND) {
+                broadcastArmless(((ServerLevel) p.level()).getServer());
+            }
             p.sendSystemMessage(Component.literal("Зачарованное золотое яблоко вылечило: ")
                     .withStyle(ChatFormatting.GREEN)
                     .append(Component.literal(cured.title).withStyle(ChatFormatting.WHITE, ChatFormatting.BOLD)));
@@ -494,14 +549,16 @@ public final class DiseaseManager {
         return false;
     }
 
-    /** Тесно ли игроку: почти все блоки вокруг ног и головы заняты. */
+    /** Тесно ли игроку: почти все блоки вокруг ног и головы твёрдые (факелы, трава и таблички не считаются). */
     private static boolean cramped(ServerPlayer p) {
         BlockPos feet = p.blockPosition();
         int[][] dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
         int filled = 0;
         for (int[] d : dirs) {
             for (int dy = 0; dy <= 1; dy++) {
-                if (!p.level().getBlockState(feet.offset(d[0], dy, d[1])).isAir()) {
+                BlockPos pos = feet.offset(d[0], dy, d[1]);
+                BlockState bs = p.level().getBlockState(pos);
+                if (bs.blocksMotion() && !bs.getCollisionShape(p.level(), pos).isEmpty()) {
                     filled++;
                 }
             }
@@ -679,12 +736,83 @@ public final class DiseaseManager {
         return names;
     }
 
-    /** Выдаёт все болезни сразу (без спама в чат). Возвращает, сколько выдано новых. */
+    private static boolean isAllQuery(String s) {
+        return s.equalsIgnoreCase("all") || s.equalsIgnoreCase("все");
+    }
+
+    private static String stripQuotes(String s) {
+        if (s.length() >= 2 && s.startsWith("\"") && s.endsWith("\"")) {
+            return s.substring(1, s.length() - 1).trim();
+        }
+        return s;
+    }
+
+    private static ServerPlayer findOnlinePlayer(MinecraftServer server, String name) {
+        for (ServerPlayer sp : server.getPlayerList().getPlayers()) {
+            if (sp.getScoreboardName().equalsIgnoreCase(name)) {
+                return sp;
+            }
+        }
+        return null;
+    }
+
+    private record ParsedTarget(ServerPlayer target, String query) {}
+
+    /** Разбирает "<болезнь> [игрок]": если игрока в конце нет - выбирается сам отправитель команды. */
+    private static ParsedTarget parseTargetAndQuery(CommandContext<CommandSourceStack> ctx, String raw, boolean allowAll)
+            throws CommandSyntaxException {
+        String trimmed = raw.trim();
+        String unquoted = stripQuotes(trimmed);
+        if (findDisease(unquoted) != null || (allowAll && isAllQuery(unquoted))) {
+            return new ParsedTarget(ctx.getSource().getPlayerOrException(), unquoted);
+        }
+        int lastSpace = trimmed.lastIndexOf(' ');
+        if (lastSpace > 0) {
+            String head = stripQuotes(trimmed.substring(0, lastSpace).trim());
+            String tail = trimmed.substring(lastSpace + 1).trim();
+            if (findDisease(head) != null || (allowAll && isAllQuery(head))) {
+                ServerPlayer target = tail.equals("@s")
+                        ? ctx.getSource().getPlayerOrException()
+                        : findOnlinePlayer(ctx.getSource().getServer(), tail);
+                if (target == null) {
+                    ctx.getSource().sendFailure(Component.literal("Игрок не найден: " + tail));
+                    return null;
+                }
+                return new ParsedTarget(target, head);
+            }
+        }
+        ctx.getSource().sendFailure(Component.literal("Нет такой болезни. Список: /disease list"));
+        return null;
+    }
+
+    private static CompletableFuture<Suggestions> suggestDiseaseOrPlayer(
+            CommandContext<CommandSourceStack> ctx, SuggestionsBuilder builder, boolean allowAll) {
+        String rem = builder.getRemaining();
+        int lastSpace = rem.lastIndexOf(' ');
+        if (lastSpace > 0) {
+            String prefix = stripQuotes(rem.substring(0, lastSpace).trim());
+            if (findDisease(prefix) != null || (allowAll && isAllQuery(prefix))) {
+                SuggestionsBuilder playerBuilder = builder.createOffset(builder.getStart() + lastSpace + 1);
+                List<String> players = new ArrayList<>();
+                for (ServerPlayer sp : ctx.getSource().getServer().getPlayerList().getPlayers()) {
+                    players.add(sp.getScoreboardName());
+                }
+                return SharedSuggestionProvider.suggest(players, playerBuilder);
+            }
+        }
+        return SharedSuggestionProvider.suggest(allowAll ? giveNames() : diseaseNames(), builder);
+    }
+
+    private static boolean isSelf(CommandSourceStack source, ServerPlayer target) {
+        return source.getEntity() == target;
+    }
+
+    /** Выдаёт все доступные болезни сразу (без спама в чат, с учётом взаимоисключений). Возвращает число новых. */
     private static int grantAll(ServerPlayer p) {
         PlayerState st = state(p);
         int count = 0;
         for (Disease d : Disease.values()) {
-            if (st.diseases.add(d)) {
+            if (isCompatible(st, d) && st.diseases.add(d)) {
                 count++;
                 if (d == Disease.OCD) {
                     st.ocdCooldown = roll(OCD_MIN, OCD_MAX);
@@ -692,8 +820,34 @@ public final class DiseaseManager {
                 }
             }
         }
+        syncAttributes(p, st);
         sync(p);
+        broadcastArmless(((ServerLevel) p.level()).getServer());
         return count;
+    }
+
+    private static int executeClear(CommandSourceStack source, ServerPlayer target) {
+        clearDiseases(target);
+        if (isSelf(source, target)) {
+            source.sendSuccess(() -> Component.literal("Все болезни сняты."), false);
+        } else {
+            target.sendSystemMessage(Component.literal("Все твои болезни сняты.").withStyle(ChatFormatting.GREEN));
+            source.sendSuccess(() -> Component.literal("Все болезни сняты у " + target.getScoreboardName() + "."), false);
+        }
+        return 1;
+    }
+
+    private static int executeRandom(CommandSourceStack source, ServerPlayer target) {
+        if (!giveRandom(target)) {
+            source.sendFailure(Component.literal(isSelf(source, target)
+                    ? "У тебя уже есть все доступные болезни."
+                    : "У игрока " + target.getScoreboardName() + " уже есть все доступные болезни."));
+            return 0;
+        }
+        if (!isSelf(source, target)) {
+            source.sendSuccess(() -> Component.literal("Игроку " + target.getScoreboardName() + " выдана случайная болезнь."), false);
+        }
+        return 1;
     }
 
     private static void registerCommands() {
@@ -739,18 +893,24 @@ public final class DiseaseManager {
                                                     .withStyle(ChatFormatting.WHITE), false);
                                             return 1;
                                         })))
-                        // /disease give <название | all> - выдать себе болезнь или все сразу (оператор)
+                        // /disease give <название | all> [игрок] - выдать болезнь или все сразу (оператор)
                         .then(Commands.literal("give").requires(DiseaseManager::isAdmin)
-                                .then(Commands.argument("name", StringArgumentType.greedyString())
-                                        .suggests((ctx, builder) ->
-                                                SharedSuggestionProvider.suggest(giveNames(), builder))
+                                .then(Commands.argument("args", StringArgumentType.greedyString())
+                                        .suggests((ctx, builder) -> suggestDiseaseOrPlayer(ctx, builder, true))
                                         .executes(ctx -> {
-                                            ServerPlayer p = ctx.getSource().getPlayerOrException();
-                                            String query = StringArgumentType.getString(ctx, "name").trim();
-                                            if (query.equalsIgnoreCase("all") || query.equalsIgnoreCase("все")) {
-                                                int given = grantAll(p);
-                                                ctx.getSource().sendSuccess(
-                                                        () -> Component.literal("Выдано болезней: " + given), false);
+                                            ParsedTarget parsed = parseTargetAndQuery(
+                                                    ctx, StringArgumentType.getString(ctx, "args"), true);
+                                            if (parsed == null) {
+                                                return 0;
+                                            }
+                                            ServerPlayer target = parsed.target();
+                                            String query = parsed.query();
+                                            boolean self = isSelf(ctx.getSource(), target);
+                                            if (isAllQuery(query)) {
+                                                int given = grantAll(target);
+                                                ctx.getSource().sendSuccess(() -> Component.literal(self
+                                                        ? "Выдано болезней: " + given
+                                                        : "Игроку " + target.getScoreboardName() + " выдано болезней: " + given), false);
                                                 return 1;
                                             }
                                             Disease d = findDisease(query);
@@ -759,47 +919,81 @@ public final class DiseaseManager {
                                                         "Нет такой болезни. Список: /disease list"));
                                                 return 0;
                                             }
-                                            if (!grant(p, d)) {
-                                                ctx.getSource().sendFailure(Component.literal(
-                                                        "Эта болезнь у тебя уже есть."));
+                                            PlayerState st = state(target);
+                                            if (!isCompatible(st, d)) {
+                                                ctx.getSource().sendFailure(Component.literal(self
+                                                        ? "Нельзя совместить с уже имеющейся болезнью (карликовость/гигантизм)."
+                                                        : "У " + target.getScoreboardName() + " уже есть несовместимая болезнь."));
                                                 return 0;
+                                            }
+                                            if (!grant(target, d)) {
+                                                ctx.getSource().sendFailure(Component.literal(self
+                                                        ? "Эта болезнь у тебя уже есть."
+                                                        : "Эта болезнь уже есть у " + target.getScoreboardName() + "."));
+                                                return 0;
+                                            }
+                                            if (!self) {
+                                                ctx.getSource().sendSuccess(() -> Component.literal(
+                                                        "Игроку " + target.getScoreboardName() + " выдана болезнь: " + d.title), false);
                                             }
                                             return 1;
                                         })))
-                        // /disease take <название> - снять одну болезнь (оператор)
+                        // /disease take <название> [игрок] - снять одну болезнь (оператор)
                         .then(Commands.literal("take").requires(DiseaseManager::isAdmin)
-                                .then(Commands.argument("name", StringArgumentType.greedyString())
-                                        .suggests((ctx, builder) ->
-                                                SharedSuggestionProvider.suggest(diseaseNames(), builder))
+                                .then(Commands.argument("args", StringArgumentType.greedyString())
+                                        .suggests((ctx, builder) -> suggestDiseaseOrPlayer(ctx, builder, false))
                                         .executes(ctx -> {
-                                            ServerPlayer p = ctx.getSource().getPlayerOrException();
-                                            Disease d = findDisease(StringArgumentType.getString(ctx, "name"));
+                                            ParsedTarget parsed = parseTargetAndQuery(
+                                                    ctx, StringArgumentType.getString(ctx, "args"), false);
+                                            if (parsed == null) {
+                                                return 0;
+                                            }
+                                            ServerPlayer target = parsed.target();
+                                            boolean self = isSelf(ctx.getSource(), target);
+                                            Disease d = findDisease(parsed.query());
                                             if (d == null) {
                                                 ctx.getSource().sendFailure(Component.literal(
                                                         "Нет такой болезни. Список: /disease list"));
                                                 return 0;
                                             }
-                                            PlayerState st = state(p);
+                                            PlayerState st = state(target);
                                             if (!st.diseases.remove(d)) {
-                                                ctx.getSource().sendFailure(Component.literal(
-                                                        "У тебя нет этой болезни."));
+                                                ctx.getSource().sendFailure(Component.literal(self
+                                                        ? "У тебя нет этой болезни."
+                                                        : "У " + target.getScoreboardName() + " нет этой болезни."));
                                                 return 0;
                                             }
-                                            st.task = null;
+                                            if (d == Disease.OCD) {
+                                                st.task = null;
+                                            }
                                             st.exposure = 0;
-                                            removeDiseaseEffects(p);
-                                            sync(p);
-                                            ctx.getSource().sendSuccess(
-                                                    () -> Component.literal("Болезнь снята: " + d.title), false);
+                                            removeDiseaseEffects(target);
+                                            syncAttributes(target, st);
+                                            sync(target);
+                                            if (d == Disease.NO_LEFT_HAND) {
+                                                broadcastArmless(((ServerLevel) target.level()).getServer());
+                                            }
+                                            if (self) {
+                                                ctx.getSource().sendSuccess(
+                                                        () -> Component.literal("Болезнь снята: " + d.title), false);
+                                            } else {
+                                                target.sendSystemMessage(Component.literal("Болезнь снята: " + d.title)
+                                                        .withStyle(ChatFormatting.GREEN));
+                                                ctx.getSource().sendSuccess(() -> Component.literal(
+                                                        "У " + target.getScoreboardName() + " снята болезнь: " + d.title), false);
+                                            }
                                             return 1;
                                         })))
-                        // /disease clear - снять все болезни (оператор)
-                        .then(Commands.literal("clear").requires(DiseaseManager::isAdmin).executes(ctx -> {
-                            ServerPlayer p = ctx.getSource().getPlayerOrException();
-                            clearDiseases(p);
-                            ctx.getSource().sendSuccess(() -> Component.literal("Все болезни сняты."), false);
-                            return 1;
-                        }))));
+                        // /disease clear [игрок] - снять все болезни (оператор)
+                        .then(Commands.literal("clear").requires(DiseaseManager::isAdmin)
+                                .executes(ctx -> executeClear(ctx.getSource(), ctx.getSource().getPlayerOrException()))
+                                .then(Commands.argument("player", EntityArgument.player())
+                                        .executes(ctx -> executeClear(ctx.getSource(), EntityArgument.getPlayer(ctx, "player")))))
+                        // /disease random [игрок] - выдать случайную болезнь (оператор)
+                        .then(Commands.literal("random").requires(DiseaseManager::isAdmin)
+                                .executes(ctx -> executeRandom(ctx.getSource(), ctx.getSource().getPlayerOrException()))
+                                .then(Commands.argument("player", EntityArgument.player())
+                                        .executes(ctx -> executeRandom(ctx.getSource(), EntityArgument.getPlayer(ctx, "player")))))));
     }
 
     // ===== Сохранение в файл мира (world/diseases.json) =====

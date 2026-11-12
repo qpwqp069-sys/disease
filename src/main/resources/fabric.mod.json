@@ -2,10 +2,10 @@
 	"schemaVersion": 1,
 	"id": "diseases",
 	"version": "${version}",
-	"name": "Diseases",
-	"description": "This is an example description! Tell everyone what your mod is about!",
+	"name": "Diseases (Vetka Fix)",
+	"description": "Random real-life-style diseases every 6-8 minutes with unique debuffs.",
 	"authors": [
-		"Me!"
+		"diseasemod"
 	],
 	"contact": {
 		"homepage": "https://fabricmc.net/",

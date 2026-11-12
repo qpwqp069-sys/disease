@@ -1,0 +1,9 @@
+{
+  "hiccup": {
+    "subtitle": "subtitles.diseases.hiccup",
+    "sounds": [
+      "diseases:hiccup1",
+      "diseases:hiccup2"
+    ]
+  }
+}

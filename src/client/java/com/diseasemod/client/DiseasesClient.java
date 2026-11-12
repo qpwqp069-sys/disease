@@ -10,7 +10,6 @@ import com.diseasemod.ArmlessSyncPayload;
 import com.diseasemod.DiseaseSyncPayload;
 import com.diseasemod.Diseases;
 import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -19,9 +18,9 @@ import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.OptionInstance;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
@@ -54,8 +53,11 @@ public class DiseasesClient implements ClientModInitializer {
     private static int feverCooldown = 900;
     private static int feverTicks = 0;
     private static final String[] PARANOIA_NAMES = {"Herobrine", "Entity_303", "Он", "Кто-то"};
-    private static boolean deafApplied = false;
-    private static double savedVolume = 1.0;
+    private static boolean lastDeaf = false;
+
+    public static boolean isDeaf() {
+        return diseases.contains(Disease.DEAFNESS);
+    }
 
     // Звуки для шизофрении (слышит только сам игрок)
     private static final SoundEvent[] PHANTOM_SOUNDS = {
@@ -104,10 +106,8 @@ public class DiseasesClient implements ClientModInitializer {
             AlexiaScrambler.active = false;
             ArmlessTracker.ids = java.util.Set.of();
             bannerTicks = 0;
-            restoreVolume(client);
+            client.execute(() -> updateDeafness(client));
         });
-
-        ClientLifecycleEvents.CLIENT_STOPPING.register(DiseasesClient::restoreVolume);
 
         ClientTickEvents.END_CLIENT_TICK.register(DiseasesClient::clientTick);
 
@@ -125,7 +125,8 @@ public class DiseasesClient implements ClientModInitializer {
         }
         LocalPlayer player = mc.player;
         List<Disease> list = diseases;
-        if (player == null || list.isEmpty() || mc.isPaused() || mc.screen != null) {
+        if (player == null || list.isEmpty() || mc.isPaused()
+                || (mc.screen != null && !(mc.screen instanceof ChatScreen))) {
             return;
         }
 
@@ -154,12 +155,6 @@ public class DiseasesClient implements ClientModInitializer {
                         v2.y,
                         v2.z + (RNG.nextFloat() - 0.5) * 0.3);
             }
-        }
-
-        // Хромота: скорость ходьбы заметно меньше
-        if (list.contains(Disease.LIMP)) {
-            Vec3 v = player.getDeltaMovement();
-            player.setDeltaMovement(v.x * 0.8, v.y, v.z * 0.8);
         }
 
         // Шизофрения: звуки, которых нет у других игроков
@@ -222,7 +217,7 @@ public class DiseasesClient implements ClientModInitializer {
             ClientLevel level = mc.level;
             if (level != null) {
                 level.playLocalSound(player.getX(), player.getY(), player.getZ(),
-                        SoundEvents.PLAYER_BURP, SoundSource.PLAYERS, 0.6f, 1.8f, false);
+                        Diseases.HICCUP_SOUND, SoundSource.PLAYERS, 0.9f, 0.95f + RNG.nextFloat() * 0.1f, false);
             }
         }
 
@@ -255,24 +250,12 @@ public class DiseasesClient implements ClientModInitializer {
         }
     }
 
-    // Глухота: общая громкость падает до 8% (после лечения возвращается)
+    // Глухота: громкость звуков снижается до 8% в SoundEngineMixin (настройки игры не трогаются)
     private static void updateDeafness(Minecraft mc) {
-        boolean deaf = diseases.contains(Disease.DEAFNESS);
-        OptionInstance<Double> master = mc.options.getSoundSourceOptionInstance(SoundSource.MASTER);
-        if (deaf && !deafApplied) {
-            savedVolume = master.get();
-            master.set(Math.min(savedVolume, 0.08));
-            deafApplied = true;
-        } else if (!deaf && deafApplied) {
-            master.set(savedVolume);
-            deafApplied = false;
-        }
-    }
-
-    private static void restoreVolume(Minecraft mc) {
-        if (deafApplied) {
-            mc.options.getSoundSourceOptionInstance(SoundSource.MASTER).set(savedVolume);
-            deafApplied = false;
+        boolean deaf = isDeaf();
+        if (deaf != lastDeaf) {
+            lastDeaf = deaf;
+            mc.getSoundManager().refreshCategoryVolume(SoundSource.MASTER);
         }
     }
 
