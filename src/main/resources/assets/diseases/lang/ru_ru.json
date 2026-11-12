@@ -1,0 +1,9 @@
+{
+  "death.attack.diseases_ocd": "%1$s умер из-за ОКР",
+  "death.attack.diseases_osteoporosis": "%1$s сломал все кости при падении",
+  "death.attack.diseases_panic_water": "%1$s захлебнулся от страха перед водой",
+  "death.attack.diseases_panic_rain": "%1$s умер от страха перед дождём",
+  "death.attack.diseases_panic_tight": "%1$s задохнулся от клаустрофобии",
+  "death.attack.diseases_panic_height": "%1$s умер от страха высоты",
+  "death.attack.diseases_panic_flowers": "%1$s умер от аллергии на цветы"
+}

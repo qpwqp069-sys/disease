@@ -1,0 +1,9 @@
+{
+  "death.attack.diseases_ocd": "%1$s died because of OCD",
+  "death.attack.diseases_osteoporosis": "%1$s broke every bone in a fall",
+  "death.attack.diseases_panic_water": "%1$s drowned in fear of water",
+  "death.attack.diseases_panic_rain": "%1$s died of fear of the rain",
+  "death.attack.diseases_panic_tight": "%1$s suffocated from claustrophobia",
+  "death.attack.diseases_panic_height": "%1$s died of fear of heights",
+  "death.attack.diseases_panic_flowers": "%1$s died from a flower allergy"
+}
