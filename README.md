@@ -38,4 +38,4 @@
 
 ## Лицензия
 
-[CC0-1.0](LICENSE)
+[MIT](LICENSE) © 2026 qpwqp (`qpwqp069-sys`)

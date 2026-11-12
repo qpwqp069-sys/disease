@@ -5,13 +5,13 @@
 	"name": "Diseases (Vetka Fix)",
 	"description": "Random real-life-style diseases every 6-8 minutes with unique debuffs.",
 	"authors": [
-		"diseasemod"
+		"qpwqp (qpwqp069-sys)"
 	],
 	"contact": {
-		"homepage": "https://fabricmc.net/",
-		"sources": "https://github.com/FabricMC/fabric-example-mod"
+		"homepage": "https://github.com/qpwqp069-sys/disease",
+		"sources": "https://github.com/qpwqp069-sys/disease"
 	},
-	"license": "CC0-1.0",
+	"license": "MIT",
 	"icon": "assets/diseases/icon.png",
 	"environment": "*",
 	"entrypoints": {
