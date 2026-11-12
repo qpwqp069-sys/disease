@@ -9,10 +9,11 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 
 /**
- * Сервер -> клиент: список болезней игрока и таймеры для интерфейса.
+ * Сервер -> клиент: список болезней игрока, таймеры и флаг панической атаки для интерфейса.
  * ticksToNext = -1 означает, что новых болезней уже не будет (получены все).
  */
-public record DiseaseSyncPayload(List<String> ids, int ticksToNext, int ticksToReset) implements CustomPacketPayload {
+public record DiseaseSyncPayload(List<String> ids, int ticksToNext, int ticksToReset, boolean panicking)
+        implements CustomPacketPayload {
     public static final Identifier PAYLOAD_ID = Identifier.fromNamespaceAndPath(Diseases.MOD_ID, "sync");
     public static final CustomPacketPayload.Type<DiseaseSyncPayload> ID = new CustomPacketPayload.Type<>(PAYLOAD_ID);
     public static final StreamCodec<RegistryFriendlyByteBuf, DiseaseSyncPayload> CODEC = StreamCodec.composite(
@@ -22,6 +23,8 @@ public record DiseaseSyncPayload(List<String> ids, int ticksToNext, int ticksToR
             DiseaseSyncPayload::ticksToNext,
             ByteBufCodecs.INT,
             DiseaseSyncPayload::ticksToReset,
+            ByteBufCodecs.BOOL,
+            DiseaseSyncPayload::panicking,
             DiseaseSyncPayload::new);
 
     @Override

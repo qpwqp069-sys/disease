@@ -54,6 +54,9 @@ public class DiseasesClient implements ClientModInitializer {
     private static int feverTicks = 0;
     private static final String[] PARANOIA_NAMES = {"Herobrine", "Entity_303", "Он", "Кто-то"};
     private static boolean lastDeaf = false;
+    private static volatile boolean panicking = false;
+    private static int panicBeatTicks = 0;
+    private static int panicPulse = 0;
 
     public static boolean isDeaf() {
         return diseases.contains(Disease.DEAFNESS);
@@ -93,6 +96,10 @@ public class DiseasesClient implements ClientModInitializer {
             AlexiaScrambler.active = out.contains(Disease.ALEXIA) || out.contains(Disease.DYSLEXIA);
             ticksToNext = payload.ticksToNext();
             ticksToReset = payload.ticksToReset();
+            panicking = payload.panicking();
+            if (!panicking) {
+                panicBeatTicks = 0;
+            }
             synced = true;
         });
 
@@ -106,6 +113,9 @@ public class DiseasesClient implements ClientModInitializer {
             AlexiaScrambler.active = false;
             ArmlessTracker.ids = java.util.Set.of();
             bannerTicks = 0;
+            panicking = false;
+            panicBeatTicks = 0;
+            panicPulse = 0;
             client.execute(() -> updateDeafness(client));
         });
 
@@ -122,6 +132,9 @@ public class DiseasesClient implements ClientModInitializer {
         updateDeafness(mc);
         if (bannerTicks > 0) {
             bannerTicks--;
+        }
+        if (panicPulse > 0) {
+            panicPulse--;
         }
         LocalPlayer player = mc.player;
         List<Disease> list = diseases;
@@ -248,6 +261,25 @@ public class DiseasesClient implements ClientModInitializer {
                         Component.literal("Тебя бьёт озноб...").withStyle(ChatFormatting.GRAY), true);
             }
         }
+
+        // Паническая атака: быстрое сердцебиение, пульсация краёв экрана и лёгкая дрожь в такт ударам
+        if (panicking) {
+            if (panicBeatTicks <= 0) {
+                panicBeatTicks = 10;
+                panicPulse = 9;
+                ClientLevel lvl = mc.level;
+                if (lvl != null) {
+                    lvl.playLocalSound(player.getX(), player.getY(), player.getZ(),
+                            Diseases.HEARTBEAT_SOUND, SoundSource.PLAYERS,
+                            1.0f, 0.97f + RNG.nextFloat() * 0.06f, false);
+                }
+                shake(player, 0.7f);
+            } else {
+                panicBeatTicks--;
+            }
+        } else {
+            panicBeatTicks = 0;
+        }
     }
 
     // Глухота: громкость звуков снижается до 8% в SoundEngineMixin (настройки игры не трогаются)
@@ -286,6 +318,9 @@ public class DiseasesClient implements ClientModInitializer {
 
         if (diseases.contains(Disease.TUNNEL_VISION)) {
             drawTunnelVision(graphics);
+        }
+        if (panicPulse > 0) {
+            drawPanicPulse(graphics);
         }
 
         // Масштаб подстраивается под "Масштаб интерфейса" в настройках игры
@@ -349,6 +384,25 @@ public class DiseasesClient implements ClientModInitializer {
                 continue;
             }
             int col = a << 24;
+            graphics.fill(0, i, w, i + 2, col);
+            graphics.fill(0, h - i - 2, w, h - i, col);
+            graphics.fill(i, 0, i + 2, h, col);
+            graphics.fill(w - i - 2, 0, w - i, h, col);
+        }
+    }
+
+    // Пульсирующая бордово-красная виньетка по краям экрана в такт сердцебиению при панической атаке
+    private static void drawPanicPulse(GuiGraphics graphics) {
+        float strength = panicPulse / 9f;
+        int w = graphics.guiWidth();
+        int h = graphics.guiHeight();
+        int depth = Math.min(w, h) / 6;
+        for (int i = 0; i < depth; i += 2) {
+            int a = (int) (90 * strength * (1f - i / (float) depth));
+            if (a < 4) {
+                continue;
+            }
+            int col = (a << 24) | 0x7A1212;
             graphics.fill(0, i, w, i + 2, col);
             graphics.fill(0, h - i - 2, w, h - i, col);
             graphics.fill(i, 0, i + 2, h, col);

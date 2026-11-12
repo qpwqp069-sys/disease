@@ -14,10 +14,13 @@ public class Diseases implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
     public static final Identifier HICCUP_SOUND_ID = Identifier.fromNamespaceAndPath(MOD_ID, "hiccup");
     public static final SoundEvent HICCUP_SOUND = SoundEvent.createVariableRangeEvent(HICCUP_SOUND_ID);
+    public static final Identifier HEARTBEAT_SOUND_ID = Identifier.fromNamespaceAndPath(MOD_ID, "heartbeat");
+    public static final SoundEvent HEARTBEAT_SOUND = SoundEvent.createVariableRangeEvent(HEARTBEAT_SOUND_ID);
 
     @Override
     public void onInitialize() {
         Registry.register(BuiltInRegistries.SOUND_EVENT, HICCUP_SOUND_ID, HICCUP_SOUND);
+        Registry.register(BuiltInRegistries.SOUND_EVENT, HEARTBEAT_SOUND_ID, HEARTBEAT_SOUND);
         PayloadTypeRegistry.playS2C().register(DiseaseSyncPayload.ID, DiseaseSyncPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(ArmlessSyncPayload.ID, ArmlessSyncPayload.CODEC);
         DiseaseManager.init();

@@ -6,5 +6,7 @@
   "death.attack.diseases_panic_tight": "%1$s задохнулся от клаустрофобии",
   "death.attack.diseases_panic_height": "%1$s умер от страха высоты",
   "death.attack.diseases_panic_flowers": "%1$s умер от аллергии на цветы",
-  "subtitles.diseases.hiccup": "Икота"
+  "death.attack.diseases_panic_sun": "%1$s умер от страха перед солнцем",
+  "subtitles.diseases.hiccup": "Икота",
+  "subtitles.diseases.heartbeat": "Учащённое сердцебиение"
 }

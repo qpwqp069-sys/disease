@@ -28,6 +28,7 @@ import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
@@ -38,6 +39,7 @@ import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
@@ -46,11 +48,14 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.Permissions;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.stats.Stats;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.damagesource.DamageType;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -94,6 +99,9 @@ public final class DiseaseManager {
         int ocdCooldown = roll(OCD_MIN, OCD_MAX);
         int sprintTicks = 0;
         int exposure = 0;
+        boolean panicking = false;
+        int dropCooldown = 0;
+        int weakSprintTicks = 0;
         OcdTask task = null;
 
         boolean has(Disease d) {
@@ -133,6 +141,20 @@ public final class DiseaseManager {
             }
             return true;
         });
+        // Слабые руки: шанс выронить предмет из главной руки при ударе моба или получении урона
+        AttackEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
+            if (!world.isClientSide() && player instanceof ServerPlayer sp && hand == InteractionHand.MAIN_HAND) {
+                tryWeakHandsDrop(sp, 22);
+            }
+            return InteractionResult.PASS;
+        });
+
+        ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, baseDamageTaken, damageTaken, blocked) -> {
+            if (entity instanceof ServerPlayer sp && damageTaken >= 1.0f && !source.is(OSTEOPOROSIS_DAMAGE)) {
+                tryWeakHandsDrop(sp, 25);
+            }
+        });
+
         ServerLifecycleEvents.SERVER_STOPPING.register(DiseaseManager::save);
         ServerTickEvents.END_SERVER_TICK.register(DiseaseManager::tick);
 
@@ -147,6 +169,10 @@ public final class DiseaseManager {
             PlayerState st = state(newPlayer);
             st.task = null;
             st.sprintTicks = 0;
+            st.weakSprintTicks = 0;
+            st.dropCooldown = 0;
+            st.exposure = 0;
+            st.panicking = false;
             st.ocdCooldown = roll(OCD_MIN, OCD_MAX);
             syncAttributes(newPlayer, st);
             sync(newPlayer);
@@ -269,7 +295,10 @@ public final class DiseaseManager {
         st.diseases.clear();
         st.task = null;
         st.sprintTicks = 0;
+        st.weakSprintTicks = 0;
+        st.dropCooldown = 0;
         st.exposure = 0;
+        st.panicking = false;
         removeDiseaseEffects(p);
         syncAttributes(p, st);
         sync(p);
@@ -292,7 +321,10 @@ public final class DiseaseManager {
             st.diseases.clear();
             st.task = null;
             st.sprintTicks = 0;
+            st.weakSprintTicks = 0;
+            st.dropCooldown = 0;
             st.exposure = 0;
+            st.panicking = false;
         }
         for (ServerPlayer p : server.getPlayerList().getPlayers()) {
             removeDiseaseEffects(p);
@@ -316,7 +348,7 @@ public final class DiseaseManager {
         }
         boolean all = availableDiseases(st).isEmpty();
         ServerPlayNetworking.send(p, new DiseaseSyncPayload(
-                ids, all ? -1 : Math.max(0, globalTimer), Math.max(0, RESET_TICKS - sinceReset)));
+                ids, all ? -1 : Math.max(0, globalTimer), Math.max(0, RESET_TICKS - sinceReset), st.panicking));
     }
 
     private static void syncAttributes(ServerPlayer p, PlayerState st) {
@@ -359,6 +391,23 @@ public final class DiseaseManager {
             } else if (st.sprintTicks > 0 && p.tickCount % 10 == 0) {
                 st.sprintTicks--;
             }
+        }
+
+        // Слабые руки: откат выпадения и шанс выронить предмет при затяжном беге
+        if (st.dropCooldown > 0) {
+            st.dropCooldown--;
+        }
+        if (st.has(Disease.WEAK_HANDS)) {
+            if (p.isSprinting()) {
+                st.weakSprintTicks++;
+                if (st.weakSprintTicks >= 60 && p.tickCount % 20 == 0) {
+                    tryWeakHandsDrop(p, 20);
+                }
+            } else if (st.weakSprintTicks > 0 && p.tickCount % 10 == 0) {
+                st.weakSprintTicks--;
+            }
+        } else {
+            st.weakSprintTicks = 0;
         }
 
         if (st.has(Disease.NO_LEFT_HAND)) {
@@ -412,7 +461,7 @@ public final class DiseaseManager {
 
     /**
      * Фобии и аллергия. Пока игрок в "опасном месте", копится паника: сначала темнеет в глазах,
-     * а если остаться дольше PANIC_AFTER секунд - начинается паническая атака с уроном.
+     * а если остаться дольше PANIC_AFTER секунд - начинается паническая атака с уроном и сердцебиением.
      */
     private static void applyFears(ServerPlayer p, PlayerState st) {
         if (p.tickCount % 20 != 0) {
@@ -423,9 +472,14 @@ public final class DiseaseManager {
         boolean tight = st.has(Disease.CLAUSTROPHOBIA) && !p.isInWater() && cramped(p);
         boolean height = st.has(Disease.ACROPHOBIA) && !p.getAbilities().flying && nearDrop(p);
         boolean flowers = st.has(Disease.ALLERGY) && (nearFlowers(p) || holdsFlower(p));
+        boolean sun = st.has(Disease.HELIOPHOBIA) && inDirectSunlight(p);
 
-        if (!(water || tight || height || flowers)) {
+        if (!(water || tight || height || flowers || sun)) {
             st.exposure = Math.max(0, st.exposure - 2);
+            if (st.panicking && st.exposure < PANIC_AFTER) {
+                st.panicking = false;
+                sync(p);
+            }
             return;
         }
         st.exposure = Math.min(st.exposure + 1, 30);
@@ -450,14 +504,65 @@ public final class DiseaseManager {
             p.displayClientMessage(
                     Component.literal("Апчхи! Аллергия на цветы...").withStyle(ChatFormatting.YELLOW), true);
         }
+        if (sun) {
+            p.addEffect(new MobEffectInstance(MobEffects.DARKNESS, 80, 0, false, false, false));
+            p.displayClientMessage(
+                    Component.literal("Слишком ярко! Боишься солнца...").withStyle(ChatFormatting.RED), true);
+        }
 
-        if (st.exposure >= PANIC_AFTER) {
+        boolean panicNow = st.exposure >= PANIC_AFTER;
+        if (panicNow != st.panicking) {
+            st.panicking = panicNow;
+            sync(p);
+        }
+
+        if (panicNow) {
             p.displayClientMessage(
                     Component.literal("Паническая атака! Уйди отсюда!").withStyle(ChatFormatting.DARK_RED), true);
             String cause = water ? (rainOnly ? "panic_rain" : "panic_water")
-                    : tight ? "panic_tight" : height ? "panic_height" : "panic_flowers";
+                    : tight ? "panic_tight"
+                    : height ? "panic_height"
+                    : sun ? "panic_sun"
+                    : "panic_flowers";
             p.hurtServer((ServerLevel) p.level(), diseaseSource(p, cause), PANIC_DAMAGE);
         }
+    }
+
+    /** Находится ли игрок днём в ясную погоду под открытым небом. */
+    private static boolean inDirectSunlight(ServerPlayer p) {
+        ServerLevel lvl = (ServerLevel) p.level();
+        if (!lvl.dimensionType().hasSkyLight() || !lvl.isBrightOutside()
+                || lvl.isRaining() || lvl.isThundering() || p.isInWater()) {
+            return false;
+        }
+        BlockPos eyePos = BlockPos.containing(p.getX(), p.getEyeY(), p.getZ());
+        return lvl.canSeeSky(eyePos);
+    }
+
+    /** Шанс выронить предмет из главной руки при «Слабых руках» с откатом 15–20 секунд. */
+    private static void tryWeakHandsDrop(ServerPlayer p, int chancePercent) {
+        if (p.isSpectator() || !p.isAlive()) {
+            return;
+        }
+        PlayerState st = state(p);
+        if (!st.has(Disease.WEAK_HANDS) || st.dropCooldown > 0) {
+            return;
+        }
+        ItemStack held = p.getMainHandItem();
+        if (held.isEmpty() || ThreadLocalRandom.current().nextInt(100) >= chancePercent) {
+            return;
+        }
+        st.dropCooldown = roll(300, 400);
+        ItemStack dropped = held.copy();
+        p.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+        p.drop(dropped, false, true);
+
+        ServerLevel lvl = (ServerLevel) p.level();
+        lvl.playSound(null, p.getX(), p.getY() + 1.0, p.getZ(),
+                SoundEvents.BUNDLE_DROP_CONTENTS, SoundSource.PLAYERS, 0.9f, 0.9f);
+        lvl.sendParticles(ParticleTypes.CLOUD, p.getX(), p.getY() + 1.0, p.getZ(), 6, 0.2, 0.15, 0.2, 0.02);
+        p.displayClientMessage(
+                Component.literal("Предмет выскользнул из рук!").withStyle(ChatFormatting.RED), true);
     }
 
     /** Держит ли игрок цветок в любой руке. */
@@ -483,7 +588,12 @@ public final class DiseaseManager {
             if (cured == Disease.OCD) {
                 st.task = null;
             }
+            if (cured == Disease.WEAK_HANDS) {
+                st.weakSprintTicks = 0;
+                st.dropCooldown = 0;
+            }
             st.exposure = 0;
+            st.panicking = false;
             removeDiseaseEffects(p);
             syncAttributes(p, st);
             sync(p);
@@ -727,6 +837,8 @@ public final class DiseaseManager {
             case TUNNEL_VISION -> "края экрана затемнены: видишь только узкий центр.";
             case DWARFISM -> "рост на четверть меньше (было 2 м - стало 1.5 м): модель и хитбокс уменьшаются целиком, текстура не растягивается. Друг видит тебя маленьким.";
             case GIGANTISM -> "рост на треть больше (хитбокс примерно 2.3 блока): в двери высотой 2 блока не пролезть, нужны проходы в 3 блока. Друг видит тебя большим.";
+            case HELIOPHOBIA -> "днём в ясную погоду под открытым небом темнеет в глазах, через 8 секунд паническая атака с уроном и сердцебиением. Под крышей, в дождь и ночью — безопасно.";
+            case WEAK_HANDS -> "при ударе моба, получении урона или долгом беге предмет из главной руки может выскользнуть перед тобой (откат 15-20 секунд).";
         };
     }
 
@@ -966,7 +1078,12 @@ public final class DiseaseManager {
                                             if (d == Disease.OCD) {
                                                 st.task = null;
                                             }
+                                            if (d == Disease.WEAK_HANDS) {
+                                                st.weakSprintTicks = 0;
+                                                st.dropCooldown = 0;
+                                            }
                                             st.exposure = 0;
+                                            st.panicking = false;
                                             removeDiseaseEffects(target);
                                             syncAttributes(target, st);
                                             sync(target);

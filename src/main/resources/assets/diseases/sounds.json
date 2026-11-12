@@ -5,5 +5,12 @@
       "diseases:hiccup1",
       "diseases:hiccup2"
     ]
+  },
+  "heartbeat": {
+    "subtitle": "subtitles.diseases.heartbeat",
+    "sounds": [
+      "diseases:heartbeat1",
+      "diseases:heartbeat2"
+    ]
   }
 }
