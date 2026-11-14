@@ -2,7 +2,7 @@
 	"schemaVersion": 1,
 	"id": "diseases",
 	"version": "${version}",
-	"name": "Diseases (Vetka Fix)",
+	"name": "Diseases Rebalance",
 	"description": "Random real-life-style diseases every 6-8 minutes with unique debuffs.",
 	"authors": [
 		"qpwqp (qpwqp069-sys)"

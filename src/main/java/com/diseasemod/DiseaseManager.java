@@ -60,10 +60,12 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.damagesource.DamageType;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.EntityReference;
 import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.animal.bee.Bee;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.LevelResource;
@@ -79,6 +81,8 @@ public final class DiseaseManager {
     private static final int ASTHMA_SPRINT_LIMIT = 5 * 20; // после 5 секунд бега - приступ астмы
     private static final float PANIC_DAMAGE = 2.0f;       // урон паники раз в секунду (2.0 = 1 сердце)
     private static final int PANIC_AFTER = 8;              // через 8 секунд в "страшном месте" - урон
+    private static final double BEE_RADIUS = 16.0;         // радиус поиска пчёл для "Неуважения к пчёлам"
+    private static final int BEE_MAX_PER_SEC = 4;          // не более 4 новых пчёл в секунду на игрока
 
     private static final Map<UUID, PlayerState> STATES = new HashMap<>();
     private static int sinceReset = 0;
@@ -88,6 +92,10 @@ public final class DiseaseManager {
     private static final Identifier ANEMIA_ID = Identifier.fromNamespaceAndPath(Diseases.MOD_ID, "anemia");
     private static final Identifier GIANT_ID = Identifier.fromNamespaceAndPath(Diseases.MOD_ID, "gigantism");
     private static final Identifier LIMP_ID = Identifier.fromNamespaceAndPath(Diseases.MOD_ID, "limp");
+    private static final Identifier SHORT_ARMS_BLOCK_ID = Identifier.fromNamespaceAndPath(Diseases.MOD_ID, "short_arms_block");
+    private static final Identifier SHORT_ARMS_ENTITY_ID = Identifier.fromNamespaceAndPath(Diseases.MOD_ID, "short_arms_entity");
+    private static final Identifier MUSCLE_WEAK_BREAK_ID = Identifier.fromNamespaceAndPath(Diseases.MOD_ID, "muscle_weak_break");
+    private static final Identifier HEART_DISEASE_ID = Identifier.fromNamespaceAndPath(Diseases.MOD_ID, "heart_disease");
     private static final ResourceKey<DamageType> OSTEOPOROSIS_DAMAGE = ResourceKey.create(
             Registries.DAMAGE_TYPE, Identifier.fromNamespaceAndPath(Diseases.MOD_ID, "osteoporosis"));
 
@@ -241,15 +249,53 @@ public final class DiseaseManager {
     }
 
     // ===== Выдача болезней =====
-    /** Проверяет, совместима ли болезнь с уже имеющимися у игрока (карликовость и гигантизм взаимоисключаемы). */
+    /**
+     * Проверяет совместимость болезни с уже имеющимися (5 пар несовместимостей):
+     * 1. Карликовость / Гигантизм
+     * 2. Алексия / Дислексия
+     * 3. Немота / Заикание
+     * 4. Слепота / Туннельное зрение
+     * 5. Слепота / Куриная слепота
+     */
     private static boolean isCompatible(PlayerState st, Disease candidate) {
-        if (candidate == Disease.DWARFISM && st.has(Disease.GIGANTISM)) {
-            return false;
-        }
-        if (candidate == Disease.GIGANTISM && st.has(Disease.DWARFISM)) {
-            return false;
-        }
+        if (candidate == Disease.DWARFISM && st.has(Disease.GIGANTISM)) return false;
+        if (candidate == Disease.GIGANTISM && st.has(Disease.DWARFISM)) return false;
+
+        if (candidate == Disease.ALEXIA && st.has(Disease.DYSLEXIA)) return false;
+        if (candidate == Disease.DYSLEXIA && st.has(Disease.ALEXIA)) return false;
+
+        if (candidate == Disease.MUTENESS && st.has(Disease.STUTTER)) return false;
+        if (candidate == Disease.STUTTER && st.has(Disease.MUTENESS)) return false;
+
+        if (candidate == Disease.BLINDNESS && (st.has(Disease.TUNNEL_VISION) || st.has(Disease.NIGHT_BLINDNESS))) return false;
+        if ((candidate == Disease.TUNNEL_VISION || candidate == Disease.NIGHT_BLINDNESS) && st.has(Disease.BLINDNESS)) return false;
+
+        if (candidate == Disease.ANEMIA && st.has(Disease.HEART_DISEASE)) return false;
+        if (candidate == Disease.HEART_DISEASE && st.has(Disease.ANEMIA)) return false;
+
         return true;
+    }
+
+    private static String incompatibleReason(PlayerState st, Disease d) {
+        if ((d == Disease.DWARFISM && st.has(Disease.GIGANTISM)) || (d == Disease.GIGANTISM && st.has(Disease.DWARFISM))) {
+            return "Карликовость и Гигантизм взаимоисключаемы.";
+        }
+        if ((d == Disease.ALEXIA && st.has(Disease.DYSLEXIA)) || (d == Disease.DYSLEXIA && st.has(Disease.ALEXIA))) {
+            return "Алексия и Дислексия несовместимы (Алексия уже заменяет весь текст).";
+        }
+        if ((d == Disease.MUTENESS && st.has(Disease.STUTTER)) || (d == Disease.STUTTER && st.has(Disease.MUTENESS))) {
+            return "Немота и Заикание несовместимы (при Немоте чат заблокирован).";
+        }
+        if ((d == Disease.BLINDNESS && st.has(Disease.TUNNEL_VISION)) || (d == Disease.TUNNEL_VISION && st.has(Disease.BLINDNESS))) {
+            return "Слепота и Туннельное зрение несовместимы (Слепота уже затемняет обзор).";
+        }
+        if ((d == Disease.BLINDNESS && st.has(Disease.NIGHT_BLINDNESS)) || (d == Disease.NIGHT_BLINDNESS && st.has(Disease.BLINDNESS))) {
+            return "Слепота и Куриная слепота несовместимы.";
+        }
+        if ((d == Disease.ANEMIA && st.has(Disease.HEART_DISEASE)) || (d == Disease.HEART_DISEASE && st.has(Disease.ANEMIA))) {
+            return "Анемия и Порок сердца несовместимы (обе болезни уменьшают здоровье).";
+        }
+        return "Несовместимо с уже имеющейся болезнью.";
     }
 
     private static List<Disease> availableDiseases(PlayerState st) {
@@ -360,6 +406,14 @@ public final class DiseaseManager {
                 st.has(Disease.GIGANTISM));
         syncModifier(p, Attributes.MOVEMENT_SPEED, LIMP_ID, -0.33, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL,
                 st.has(Disease.LIMP));
+        syncModifier(p, Attributes.BLOCK_INTERACTION_RANGE, SHORT_ARMS_BLOCK_ID, -2.0, AttributeModifier.Operation.ADD_VALUE,
+                st.has(Disease.SHORT_ARMS));
+        syncModifier(p, Attributes.ENTITY_INTERACTION_RANGE, SHORT_ARMS_ENTITY_ID, -1.5, AttributeModifier.Operation.ADD_VALUE,
+                st.has(Disease.SHORT_ARMS));
+        syncModifier(p, Attributes.BLOCK_BREAK_SPEED, MUSCLE_WEAK_BREAK_ID, -0.5, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL,
+                st.has(Disease.MUSCLE_WEAKNESS));
+        syncModifier(p, Attributes.MAX_HEALTH, HEART_DISEASE_ID, -6.0, AttributeModifier.Operation.ADD_VALUE,
+                st.has(Disease.HEART_DISEASE));
     }
 
     // ===== Эффекты болезней (серверные) =====
@@ -408,6 +462,11 @@ public final class DiseaseManager {
             }
         } else {
             st.weakSprintTicks = 0;
+        }
+
+        // Неуважение к пчёлам: раз в секунду пчёлы на виду агрятся на игрока
+        if (st.has(Disease.BEE_DISRESPECT) && p.tickCount % 20 == 0 && !p.isCreative() && !p.isSpectator()) {
+            tickBeeDisrespect(p);
         }
 
         if (st.has(Disease.NO_LEFT_HAND)) {
@@ -563,6 +622,31 @@ public final class DiseaseManager {
         lvl.sendParticles(ParticleTypes.CLOUD, p.getX(), p.getY() + 1.0, p.getZ(), 6, 0.2, 0.15, 0.2, 0.02);
         p.displayClientMessage(
                 Component.literal("Предмет выскользнул из рук!").withStyle(ChatFormatting.RED), true);
+    }
+
+    /**
+     * Неуважение к пчёлам: пчёлы в радиусе 16 блоков при прямой видимости
+     * мгновенно злятся на игрока и летят жалить без удара (до 4 новых пчёл в секунду).
+     */
+    private static void tickBeeDisrespect(ServerPlayer p) {
+        ServerLevel lvl = (ServerLevel) p.level();
+        List<Bee> bees = lvl.getEntitiesOfClass(Bee.class, p.getBoundingBox().inflate(BEE_RADIUS),
+                b -> b.isAlive() && !b.hasStung() && b.getTarget() != p);
+        if (bees.isEmpty()) {
+            return;
+        }
+        int provoked = 0;
+        for (Bee bee : bees) {
+            if (bee.hasLineOfSight(p)) {
+                bee.setPersistentAngerTarget(EntityReference.of(p));
+                bee.startPersistentAngerTimer();
+                bee.setTarget(p);
+                provoked++;
+                if (provoked >= BEE_MAX_PER_SEC) {
+                    break;
+                }
+            }
+        }
     }
 
     /** Держит ли игрок цветок в любой руке. */
@@ -839,6 +923,10 @@ public final class DiseaseManager {
             case GIGANTISM -> "рост на треть больше (хитбокс примерно 2.3 блока): в двери высотой 2 блока не пролезть, нужны проходы в 3 блока. Друг видит тебя большим.";
             case HELIOPHOBIA -> "днём в ясную погоду под открытым небом темнеет в глазах, через 8 секунд паническая атака с уроном и сердцебиением. Под крышей, в дождь и ночью — безопасно.";
             case WEAK_HANDS -> "при ударе моба, получении урона или долгом беге предмет из главной руки может выскользнуть перед тобой (откат 15-20 секунд).";
+            case BEE_DISRESPECT -> "пчёлы в радиусе 16 блоков при прямой видимости мгновенно злятся и летят жалить без удара (до 4 пчёл в секунду).";
+            case SHORT_ARMS -> "дистанция удара и взаимодействия с блоками снижена на 2 блока: нужно подходить вплотную.";
+            case MUSCLE_WEAKNESS -> "скорость копания снижена на 50%: блоки ломаются вдвое дольше. На возможность и силу ударов не влияет.";
+            case HEART_DISEASE -> "максимальное здоровье снижено до 7 сердец (14 HP).";
         };
     }
 
@@ -1033,9 +1121,10 @@ public final class DiseaseManager {
                                             }
                                             PlayerState st = state(target);
                                             if (!isCompatible(st, d)) {
+                                                String reason = incompatibleReason(st, d);
                                                 ctx.getSource().sendFailure(Component.literal(self
-                                                        ? "Нельзя совместить с уже имеющейся болезнью (карликовость/гигантизм)."
-                                                        : "У " + target.getScoreboardName() + " уже есть несовместимая болезнь."));
+                                                        ? "Нельзя совместить: " + reason
+                                                        : "У " + target.getScoreboardName() + " несовместимая болезнь: " + reason));
                                                 return 0;
                                             }
                                             if (!grant(target, d)) {
