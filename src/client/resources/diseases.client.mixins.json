@@ -5,7 +5,8 @@
   "client": [
     "FontMixin",
     "PlayerModelMixin",
-    "SoundEngineMixin"
+    "SoundEngineMixin",
+    "ArmorLayerMixin"
   ],
   "injectors": {
     "defaultRequire": 1

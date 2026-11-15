@@ -2,8 +2,10 @@ package com.diseasemod;
 
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -205,6 +207,18 @@ public final class DiseaseManager {
             return true;
         });
 
+        // Немота: блокируем и команды, рассылающие сообщения в чат (/msg, /tell, /me, /say, /teammsg).
+        // Событие срабатывает только для команд с чат-выводом, поэтому белый список не нужен.
+        ServerMessageEvents.ALLOW_COMMAND_MESSAGE.register((message, source, params) -> {
+            ServerPlayer sp = source.getPlayer();
+            if (sp != null && state(sp).has(Disease.MUTENESS)) {
+                sp.displayClientMessage(
+                        Component.literal("Ты нем и не можешь говорить!").withStyle(ChatFormatting.RED), true);
+                return false;
+            }
+            return true;
+        });
+
         registerCommands();
     }
 
@@ -351,14 +365,24 @@ public final class DiseaseManager {
         broadcastArmless(((ServerLevel) p.level()).getServer());
     }
 
-    /** Снимает эффекты, которые накладывают болезни (чтобы они не висели после лечения). */
+    /** Снимает эффект, только если ни одна из оставшихся болезней его больше не вызывает.
+     *  WEAKNESS и WITHER мод не накладывает — чужие эффекты не трогаем. */
     private static void removeDiseaseEffects(ServerPlayer p) {
-        p.removeEffect(MobEffects.BLINDNESS);
-        p.removeEffect(MobEffects.HUNGER);
-        p.removeEffect(MobEffects.WEAKNESS);
-        p.removeEffect(MobEffects.DARKNESS);
-        p.removeEffect(MobEffects.POISON);
-        p.removeEffect(MobEffects.WITHER);
+        PlayerState st = state(p);
+        if (!st.has(Disease.BLINDNESS) && !st.has(Disease.ASTHMA) && !st.has(Disease.ALLERGY)) {
+            p.removeEffect(MobEffects.BLINDNESS);
+        }
+        if (!st.has(Disease.DIABETES)) {
+            p.removeEffect(MobEffects.HUNGER);
+        }
+        if (!st.has(Disease.NIGHT_BLINDNESS) && !st.has(Disease.ANEMIA)
+                && !st.has(Disease.AQUAPHOBIA) && !st.has(Disease.CLAUSTROPHOBIA)
+                && !st.has(Disease.ACROPHOBIA) && !st.has(Disease.HELIOPHOBIA)) {
+            p.removeEffect(MobEffects.DARKNESS);
+        }
+        if (!st.has(Disease.HEMOPHILIA)) {
+            p.removeEffect(MobEffects.POISON);
+        }
     }
 
     private static void resetAll(MinecraftServer server) {
@@ -418,6 +442,11 @@ public final class DiseaseManager {
 
     // ===== Эффекты болезней (серверные) =====
     private static void applyEffects(ServerPlayer p, PlayerState st) {
+        // Болезни не действуют в креативе и спектаторе
+        if (p.isCreative() || p.isSpectator()) {
+            return;
+        }
+
         boolean refresh = p.tickCount % 40 == 0;
 
         if (st.has(Disease.BLINDNESS) && refresh) {
@@ -523,6 +552,15 @@ public final class DiseaseManager {
      * а если остаться дольше PANIC_AFTER секунд - начинается паническая атака с уроном и сердцебиением.
      */
     private static void applyFears(ServerPlayer p, PlayerState st) {
+        if (p.isCreative() || p.isSpectator()) {
+            st.exposure = 0;
+            if (st.panicking) {
+                st.panicking = false;
+                sync(p); // гасим сердцебиение/виньетку на клиенте
+            }
+            return;
+        }
+
         if (p.tickCount % 20 != 0) {
             return;
         }
@@ -654,7 +692,7 @@ public final class DiseaseManager {
         return p.getMainHandItem().is(ItemTags.FLOWERS) || p.getOffhandItem().is(ItemTags.FLOWERS);
     }
 
-    /** Зачарованное золотое яблоко (даёт Поглощение IV) лечит одну случайную болезнь. */
+    /** Зачарованное золотое яблоко (Поглощение IV) лечит одну случайную болезнь. */
     private static void checkCure(ServerPlayer p, PlayerState st) {
         if (st.cureCooldown > 0) {
             st.cureCooldown--;
@@ -664,8 +702,9 @@ public final class DiseaseManager {
             return;
         }
         MobEffectInstance abs = p.getEffect(MobEffects.ABSORPTION);
-        if (abs != null && abs.getAmplifier() >= 3 && abs.getDuration() > 2300) {
-            st.cureCooldown = 200;
+        // Окно: первые 400 тиков (20 сек) из 2400. Кулдаун 400 НЕ даёт вылечить две болезни одним яблоком.
+        if (abs != null && abs.getAmplifier() >= 3 && abs.getDuration() > 2000) {
+            st.cureCooldown = 400;
             List<Disease> owned = new ArrayList<>(st.diseases);
             Disease cured = owned.get(ThreadLocalRandom.current().nextInt(owned.size()));
             st.diseases.remove(cured);
@@ -743,7 +782,7 @@ public final class DiseaseManager {
         return false;
     }
 
-    /** Тесно ли игроку: почти все блоки вокруг ног и головы твёрдые (факелы, трава и таблички не считаются). */
+    /** Тесно ли игроку: от 4 твёрдых блоков вокруг ног/головы И низкий потолок над головой. */
     private static boolean cramped(ServerPlayer p) {
         BlockPos feet = p.blockPosition();
         int[][] dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
@@ -757,7 +796,12 @@ public final class DiseaseManager {
                 }
             }
         }
-        return filled >= 7;
+        if (filled < 4) {
+            return false;
+        }
+        BlockPos ceiling = feet.above(2);
+        BlockState cs = p.level().getBlockState(ceiling);
+        return cs.blocksMotion() && !cs.getCollisionShape(p.level(), ceiling).isEmpty();
     }
 
     /** Заикание: к части слов добавляется повтор первой буквы. */
@@ -780,7 +824,7 @@ public final class DiseaseManager {
         return sb.toString();
     }
 
-    /** Есть ли рядом (в 2 блоках) обрыв глубиной 9+ блоков. */
+    /** Есть ли рядом (в 2 блоках) обрыв глубиной 9+ блоков. Вода, лава и растения не считаются "полом". */
     private static boolean nearDrop(ServerPlayer p) {
         BlockPos base = p.blockPosition();
         int[][] dirs = {{2, 0}, {-2, 0}, {0, 2}, {0, -2}};
@@ -788,7 +832,8 @@ public final class DiseaseManager {
             BlockPos pos = base.offset(d[0], 0, d[1]);
             int air = 0;
             for (int i = 1; i <= 10; i++) {
-                if (p.level().getBlockState(pos.below(i)).isAir()) {
+                BlockState bs = p.level().getBlockState(pos.below(i));
+                if (bs.isAir() || !bs.blocksMotion() || !bs.getFluidState().isEmpty()) {
                     air++;
                 } else {
                     break;
@@ -807,7 +852,7 @@ public final class DiseaseManager {
     }
 
     private static void tickOcd(MinecraftServer server, ServerPlayer p, PlayerState st) {
-        if (!st.has(Disease.OCD)) {
+        if (!st.has(Disease.OCD) || p.isCreative() || p.isSpectator()) {
             st.task = null;
             return;
         }
@@ -920,11 +965,11 @@ public final class DiseaseManager {
             case PARANOIA -> "раз в 1-3 минуты тебе мерещится: ложное сообщение, что кто-то зашёл в игру, и звук рядом. Видишь и слышишь только ты.";
             case TUNNEL_VISION -> "края экрана затемнены: видишь только узкий центр.";
             case DWARFISM -> "рост на четверть меньше (было 2 м - стало 1.5 м): модель и хитбокс уменьшаются целиком, текстура не растягивается. Друг видит тебя маленьким.";
-            case GIGANTISM -> "рост на треть больше (хитбокс примерно 2.3 блока): в двери высотой 2 блока не пролезть, нужны проходы в 3 блока. Друг видит тебя большим.";
+            case GIGANTISM -> "рост на 30% больше (хитбокс примерно 2.3 блока): в двери высотой 2 блока не пролезть, нужны проходы в 3 блока. Друг видит тебя большим.";
             case HELIOPHOBIA -> "днём в ясную погоду под открытым небом темнеет в глазах, через 8 секунд паническая атака с уроном и сердцебиением. Под крышей, в дождь и ночью — безопасно.";
             case WEAK_HANDS -> "при ударе моба, получении урона или долгом беге предмет из главной руки может выскользнуть перед тобой (откат 15-20 секунд).";
             case BEE_DISRESPECT -> "пчёлы в радиусе 16 блоков при прямой видимости мгновенно злятся и летят жалить без удара (до 4 пчёл в секунду).";
-            case SHORT_ARMS -> "дистанция удара и взаимодействия с блоками снижена на 2 блока: нужно подходить вплотную.";
+            case SHORT_ARMS -> "дистанция добычи блоков снижена на 2 блока, дистанция удара по сущностям — на 1.5 блока: нужно подходить вплотную.";
             case MUSCLE_WEAKNESS -> "скорость копания снижена на 50%: блоки ломаются вдвое дольше. На возможность и силу ударов не влияет.";
             case HEART_DISEASE -> "максимальное здоровье снижено до 7 сердец (14 HP).";
         };
@@ -1226,14 +1271,18 @@ public final class DiseaseManager {
             }
             JsonObject players = root.has("players") ? root.getAsJsonObject("players") : new JsonObject();
             for (Map.Entry<String, JsonElement> e : players.entrySet()) {
-                PlayerState st = new PlayerState();
-                for (JsonElement el : e.getValue().getAsJsonArray()) {
-                    Disease d = Disease.byId(el.getAsString());
-                    if (d != null) {
-                        st.diseases.add(d);
+                try {
+                    PlayerState st = new PlayerState();
+                    for (JsonElement el : e.getValue().getAsJsonArray()) {
+                        Disease d = Disease.byId(el.getAsString());
+                        if (d != null) {
+                            st.diseases.add(d);
+                        }
                     }
+                    STATES.put(UUID.fromString(e.getKey()), st);
+                } catch (Exception ex) {
+                    Diseases.LOGGER.warn("Битая запись в diseases.json, пропущена: {}", e.getKey());
                 }
-                STATES.put(UUID.fromString(e.getKey()), st);
             }
         } catch (Exception ex) {
             Diseases.LOGGER.error("Не удалось загрузить diseases.json", ex);
@@ -1254,7 +1303,14 @@ public final class DiseaseManager {
                 players.add(e.getKey().toString(), arr);
             }
             root.add("players", players);
-            Files.writeString(file(server), new Gson().toJson(root), StandardCharsets.UTF_8);
+            Path file = file(server);
+            Path tmp = file.resolveSibling("diseases.json.tmp");
+            Files.writeString(tmp, new Gson().toJson(root), StandardCharsets.UTF_8);
+            try {
+                Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException ex) {
+                Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (Exception ex) {
             Diseases.LOGGER.error("Не удалось сохранить diseases.json", ex);
         }

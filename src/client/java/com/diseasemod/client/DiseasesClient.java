@@ -312,15 +312,20 @@ public class DiseasesClient implements ClientModInitializer {
 
     private static void render(GuiGraphics graphics, DeltaTracker tickCounter) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.options.hideGui || !synced) {
+        if (!synced) {
             return;
         }
 
+        // Виньетки — часть "зрения", а не интерфейса: F1 их не отключает.
         if (diseases.contains(Disease.TUNNEL_VISION)) {
             drawTunnelVision(graphics);
         }
         if (panicPulse > 0) {
             drawPanicPulse(graphics);
+        }
+
+        if (mc.options.hideGui) {
+            return;
         }
 
         // Масштаб подстраивается под "Масштаб интерфейса" в настройках игры
