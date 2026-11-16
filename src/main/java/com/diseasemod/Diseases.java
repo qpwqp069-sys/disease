@@ -23,6 +23,7 @@ public class Diseases implements ModInitializer {
         Registry.register(BuiltInRegistries.SOUND_EVENT, HEARTBEAT_SOUND_ID, HEARTBEAT_SOUND);
         PayloadTypeRegistry.playS2C().register(DiseaseSyncPayload.ID, DiseaseSyncPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(ArmlessSyncPayload.ID, ArmlessSyncPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(StutterSyncPayload.ID, StutterSyncPayload.CODEC);
         DiseaseManager.init();
         LOGGER.info("Diseases mod loaded");
     }

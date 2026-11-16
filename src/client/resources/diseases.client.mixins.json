@@ -6,7 +6,9 @@
     "FontMixin",
     "PlayerModelMixin",
     "SoundEngineMixin",
-    "ArmorLayerMixin"
+    "ArmorLayerMixin",
+    "ChatComponentMixin",
+    "ChatListenerMixin"
   ],
   "injectors": {
     "defaultRequire": 1

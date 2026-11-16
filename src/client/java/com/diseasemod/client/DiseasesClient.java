@@ -5,10 +5,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Random;
 
-import com.diseasemod.Disease;
 import com.diseasemod.ArmlessSyncPayload;
+import com.diseasemod.Disease;
 import com.diseasemod.DiseaseSyncPayload;
 import com.diseasemod.Diseases;
+import com.diseasemod.StutterSyncPayload;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
@@ -107,11 +108,17 @@ public class DiseasesClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(ArmlessSyncPayload.ID, (payload, context) ->
                 ArmlessTracker.ids = new java.util.HashSet<>(payload.ids()));
 
+        // Кто из игроков заикается (для отображения в чате)
+        ClientPlayNetworking.registerGlobalReceiver(StutterSyncPayload.ID, (payload, context) ->
+                StutterTracker.ids = new java.util.HashSet<>(payload.ids()));
+
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             diseases = List.of();
             synced = false;
             AlexiaScrambler.active = false;
             ArmlessTracker.ids = java.util.Set.of();
+            StutterTracker.ids = java.util.Set.of();
+            StutterTracker.currentSender = null;
             bannerTicks = 0;
             panicking = false;
             panicBeatTicks = 0;

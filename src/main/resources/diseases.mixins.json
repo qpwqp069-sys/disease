@@ -2,7 +2,9 @@
 	"required": true,
 	"package": "com.diseasemod.mixin",
 	"compatibilityLevel": "JAVA_21",
-	"mixins": [],
+	"mixins": [
+		"EnchantedAppleCureMixin"
+	],
 	"injectors": {
 		"defaultRequire": 1
 	},

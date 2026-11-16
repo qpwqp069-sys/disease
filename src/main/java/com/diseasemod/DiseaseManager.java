@@ -105,10 +105,9 @@ public final class DiseaseManager {
 
     private static final class PlayerState {
         final LinkedHashSet<Disease> diseases = new LinkedHashSet<>();
-        int cureCooldown = 0;
         int ocdCooldown = roll(OCD_MIN, OCD_MAX);
         int sprintTicks = 0;
-        int exposure = 0;
+        int exposureWater = 0, exposureTight = 0, exposureHeight = 0, exposureFlowers = 0, exposureSun = 0;
         boolean panicking = false;
         int dropCooldown = 0;
         int weakSprintTicks = 0;
@@ -173,6 +172,7 @@ public final class DiseaseManager {
             syncAttributes(p, state(p));
             sync(p);
             broadcastArmless(server);
+            broadcastStutter(server);
         });
 
         ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
@@ -181,12 +181,13 @@ public final class DiseaseManager {
             st.sprintTicks = 0;
             st.weakSprintTicks = 0;
             st.dropCooldown = 0;
-            st.exposure = 0;
+            st.exposureWater = st.exposureTight = st.exposureHeight = st.exposureFlowers = st.exposureSun = 0;
             st.panicking = false;
             st.ocdCooldown = roll(OCD_MIN, OCD_MAX);
             syncAttributes(newPlayer, st);
             sync(newPlayer);
             broadcastArmless(((ServerLevel) newPlayer.level()).getServer());
+            broadcastStutter(((ServerLevel) newPlayer.level()).getServer());
         });
 
         // Немота: сообщения в чат блокируются
@@ -194,14 +195,6 @@ public final class DiseaseManager {
             if (state(sender).has(Disease.MUTENESS)) {
                 sender.displayClientMessage(
                         Component.literal("Ты нем и не можешь говорить!").withStyle(ChatFormatting.RED), true);
-                return false;
-            }
-            // Заикание: сообщение заменяется на заикающуюся версию
-            if (state(sender).has(Disease.STUTTER)) {
-                MinecraftServer server = ((ServerLevel) sender.level()).getServer();
-                String text = stutter(message.decoratedContent().getString());
-                server.getPlayerList().broadcastSystemMessage(
-                        Component.literal("<" + sender.getName().getString() + "> " + text), false);
                 return false;
             }
             return true;
@@ -245,7 +238,6 @@ public final class DiseaseManager {
             PlayerState st = state(p);
 
             applyEffects(p, st);
-            checkCure(p, st);
             tickOcd(server, p, st);
 
             if (tickCounter % 20 == 0) {
@@ -255,6 +247,7 @@ public final class DiseaseManager {
 
         if (tickCounter % 20 == 0) {
             broadcastArmless(server);
+            broadcastStutter(server);
         }
 
         if (tickCounter % 6000 == 0) {
@@ -339,6 +332,9 @@ public final class DiseaseManager {
         if (d == Disease.NO_LEFT_HAND) {
             broadcastArmless(((ServerLevel) p.level()).getServer());
         }
+        if (d == Disease.STUTTER) {
+            broadcastStutter(((ServerLevel) p.level()).getServer());
+        }
         return true;
     }
 
@@ -357,12 +353,13 @@ public final class DiseaseManager {
         st.sprintTicks = 0;
         st.weakSprintTicks = 0;
         st.dropCooldown = 0;
-        st.exposure = 0;
+        st.exposureWater = st.exposureTight = st.exposureHeight = st.exposureFlowers = st.exposureSun = 0;
         st.panicking = false;
         removeDiseaseEffects(p);
         syncAttributes(p, st);
         sync(p);
         broadcastArmless(((ServerLevel) p.level()).getServer());
+        broadcastStutter(((ServerLevel) p.level()).getServer());
     }
 
     /** Снимает эффект, только если ни одна из оставшихся болезней его больше не вызывает.
@@ -393,7 +390,7 @@ public final class DiseaseManager {
             st.sprintTicks = 0;
             st.weakSprintTicks = 0;
             st.dropCooldown = 0;
-            st.exposure = 0;
+            st.exposureWater = st.exposureTight = st.exposureHeight = st.exposureFlowers = st.exposureSun = 0;
             st.panicking = false;
         }
         for (ServerPlayer p : server.getPlayerList().getPlayers()) {
@@ -402,6 +399,7 @@ public final class DiseaseManager {
             sync(p);
         }
         broadcastArmless(server);
+        broadcastStutter(server);
         server.getPlayerList().broadcastSystemMessage(
                 Component.literal("Прошло 5 дней: все болезни отступили.").withStyle(ChatFormatting.GREEN), false);
     }
@@ -553,7 +551,7 @@ public final class DiseaseManager {
      */
     private static void applyFears(ServerPlayer p, PlayerState st) {
         if (p.isCreative() || p.isSpectator()) {
-            st.exposure = 0;
+            st.exposureWater = st.exposureTight = st.exposureHeight = st.exposureFlowers = st.exposureSun = 0;
             if (st.panicking) {
                 st.panicking = false;
                 sync(p); // гасим сердцебиение/виньетку на клиенте
@@ -571,15 +569,11 @@ public final class DiseaseManager {
         boolean flowers = st.has(Disease.ALLERGY) && (nearFlowers(p) || holdsFlower(p));
         boolean sun = st.has(Disease.HELIOPHOBIA) && inDirectSunlight(p);
 
-        if (!(water || tight || height || flowers || sun)) {
-            st.exposure = Math.max(0, st.exposure - 2);
-            if (st.panicking && st.exposure < PANIC_AFTER) {
-                st.panicking = false;
-                sync(p);
-            }
-            return;
-        }
-        st.exposure = Math.min(st.exposure + 1, 30);
+        st.exposureWater = water ? Math.min(st.exposureWater + 1, 30) : Math.max(0, st.exposureWater - 2);
+        st.exposureTight = tight ? Math.min(st.exposureTight + 1, 30) : Math.max(0, st.exposureTight - 2);
+        st.exposureHeight = height ? Math.min(st.exposureHeight + 1, 30) : Math.max(0, st.exposureHeight - 2);
+        st.exposureFlowers = flowers ? Math.min(st.exposureFlowers + 1, 30) : Math.max(0, st.exposureFlowers - 2);
+        st.exposureSun = sun ? Math.min(st.exposureSun + 1, 30) : Math.max(0, st.exposureSun - 2);
 
         if (water) {
             p.addEffect(new MobEffectInstance(MobEffects.DARKNESS, 80, 0, false, false, false));
@@ -607,7 +601,9 @@ public final class DiseaseManager {
                     Component.literal("Слишком ярко! Боишься солнца...").withStyle(ChatFormatting.RED), true);
         }
 
-        boolean panicNow = st.exposure >= PANIC_AFTER;
+        boolean panicNow = st.exposureWater >= PANIC_AFTER || st.exposureTight >= PANIC_AFTER ||
+                st.exposureHeight >= PANIC_AFTER || st.exposureFlowers >= PANIC_AFTER || st.exposureSun >= PANIC_AFTER;
+
         if (panicNow != st.panicking) {
             st.panicking = panicNow;
             sync(p);
@@ -616,11 +612,28 @@ public final class DiseaseManager {
         if (panicNow) {
             p.displayClientMessage(
                     Component.literal("Паническая атака! Уйди отсюда!").withStyle(ChatFormatting.DARK_RED), true);
-            String cause = water ? (rainOnly ? "panic_rain" : "panic_water")
-                    : tight ? "panic_tight"
-                    : height ? "panic_height"
-                    : sun ? "panic_sun"
-                    : "panic_flowers";
+            String cause;
+            if (water && st.exposureWater >= PANIC_AFTER) {
+                cause = rainOnly ? "panic_rain" : "panic_water";
+            } else if (tight && st.exposureTight >= PANIC_AFTER) {
+                cause = "panic_tight";
+            } else if (height && st.exposureHeight >= PANIC_AFTER) {
+                cause = "panic_height";
+            } else if (sun && st.exposureSun >= PANIC_AFTER) {
+                cause = "panic_sun";
+            } else if (flowers && st.exposureFlowers >= PANIC_AFTER) {
+                cause = "panic_flowers";
+            } else if (st.exposureWater >= PANIC_AFTER) {
+                cause = rainOnly ? "panic_rain" : "panic_water";
+            } else if (st.exposureTight >= PANIC_AFTER) {
+                cause = "panic_tight";
+            } else if (st.exposureHeight >= PANIC_AFTER) {
+                cause = "panic_height";
+            } else if (st.exposureSun >= PANIC_AFTER) {
+                cause = "panic_sun";
+            } else {
+                cause = "panic_flowers";
+            }
             p.hurtServer((ServerLevel) p.level(), diseaseSource(p, cause), PANIC_DAMAGE);
         }
     }
@@ -692,45 +705,44 @@ public final class DiseaseManager {
         return p.getMainHandItem().is(ItemTags.FLOWERS) || p.getOffhandItem().is(ItemTags.FLOWERS);
     }
 
-    /** Зачарованное золотое яблоко (Поглощение IV) лечит одну случайную болезнь. */
-    private static void checkCure(ServerPlayer p, PlayerState st) {
-        if (st.cureCooldown > 0) {
-            st.cureCooldown--;
-            return;
-        }
+    /** Зачарованное золотое яблоко вылечивает одну случайную болезнь. */
+    public static void cureOneDisease(ServerPlayer p) {
+        PlayerState st = state(p);
         if (st.diseases.isEmpty()) {
             return;
         }
-        MobEffectInstance abs = p.getEffect(MobEffects.ABSORPTION);
-        // Окно: первые 400 тиков (20 сек) из 2400. Кулдаун 400 НЕ даёт вылечить две болезни одним яблоком.
-        if (abs != null && abs.getAmplifier() >= 3 && abs.getDuration() > 2000) {
-            st.cureCooldown = 400;
-            List<Disease> owned = new ArrayList<>(st.diseases);
-            Disease cured = owned.get(ThreadLocalRandom.current().nextInt(owned.size()));
-            st.diseases.remove(cured);
-            if (cured == Disease.OCD) {
-                st.task = null;
-            }
-            if (cured == Disease.WEAK_HANDS) {
-                st.weakSprintTicks = 0;
-                st.dropCooldown = 0;
-            }
-            st.exposure = 0;
-            st.panicking = false;
-            removeDiseaseEffects(p);
-            syncAttributes(p, st);
-            sync(p);
-            if (cured == Disease.NO_LEFT_HAND) {
-                broadcastArmless(((ServerLevel) p.level()).getServer());
-            }
-            p.sendSystemMessage(Component.literal("Зачарованное золотое яблоко вылечило: ")
-                    .withStyle(ChatFormatting.GREEN)
-                    .append(Component.literal(cured.title).withStyle(ChatFormatting.WHITE, ChatFormatting.BOLD)));
+
+        List<Disease> owned = new ArrayList<>(st.diseases);
+        Disease cured = owned.get(ThreadLocalRandom.current().nextInt(owned.size()));
+        st.diseases.remove(cured);
+
+        if (cured == Disease.OCD) {
+            st.task = null;
         }
+        if (cured == Disease.WEAK_HANDS) {
+            st.weakSprintTicks = 0;
+            st.dropCooldown = 0;
+        }
+        st.exposureWater = st.exposureTight = st.exposureHeight = st.exposureFlowers = st.exposureSun = 0;
+        st.panicking = false;
+
+        removeDiseaseEffects(p);
+        syncAttributes(p, st);
+        sync(p);
+        if (cured == Disease.NO_LEFT_HAND) {
+            broadcastArmless(((ServerLevel) p.level()).getServer());
+        }
+        if (cured == Disease.STUTTER) {
+            broadcastStutter(((ServerLevel) p.level()).getServer());
+        }
+
+        p.sendSystemMessage(Component.literal("Зачарованное золотое яблоко вылечило: ")
+                .withStyle(ChatFormatting.GREEN)
+                .append(Component.literal(cured.title).withStyle(ChatFormatting.WHITE, ChatFormatting.BOLD)));
     }
 
     /** Раз в секунду сообщает всем клиентам, у кого сейчас нет левой руки (для отрисовки модели). */
-    private static void broadcastArmless(MinecraftServer server) {
+    public static void broadcastArmless(MinecraftServer server) {
         List<Integer> ids = new ArrayList<>();
         for (ServerPlayer q : server.getPlayerList().getPlayers()) {
             if (state(q).has(Disease.NO_LEFT_HAND)) {
@@ -740,6 +752,22 @@ public final class DiseaseManager {
         ArmlessSyncPayload payload = new ArmlessSyncPayload(ids);
         for (ServerPlayer q : server.getPlayerList().getPlayers()) {
             if (ServerPlayNetworking.canSend(q, ArmlessSyncPayload.ID)) {
+                ServerPlayNetworking.send(q, payload);
+            }
+        }
+    }
+
+    /** Сообщает всем клиентам список игроков, которые сейчас заикаются. */
+    public static void broadcastStutter(MinecraftServer server) {
+        List<UUID> ids = new ArrayList<>();
+        for (ServerPlayer q : server.getPlayerList().getPlayers()) {
+            if (state(q).has(Disease.STUTTER)) {
+                ids.add(q.getUUID());
+            }
+        }
+        StutterSyncPayload payload = new StutterSyncPayload(ids);
+        for (ServerPlayer q : server.getPlayerList().getPlayers()) {
+            if (ServerPlayNetworking.canSend(q, StutterSyncPayload.ID)) {
                 ServerPlayNetworking.send(q, payload);
             }
         }
@@ -805,13 +833,18 @@ public final class DiseaseManager {
     }
 
     /** Заикание: к части слов добавляется повтор первой буквы. */
-    private static String stutter(String text) {
+    public static String stutter(String text) {
+        if (text == null || text.isEmpty()) {
+            return text == null ? "" : "";
+        }
         ThreadLocalRandom rnd = ThreadLocalRandom.current();
         StringBuilder sb = new StringBuilder();
-        for (String w : text.split(" ")) {
-            if (sb.length() > 0) {
+        String[] words = text.split(" ", -1);
+        for (int i = 0; i < words.length; i++) {
+            if (i > 0) {
                 sb.append(' ');
             }
+            String w = words[i];
             if (w.length() > 1 && Character.isLetter(w.charAt(0)) && rnd.nextInt(100) < 60) {
                 String first = w.substring(0, 1);
                 sb.append(first).append('-');
@@ -1068,6 +1101,7 @@ public final class DiseaseManager {
         syncAttributes(p, st);
         sync(p);
         broadcastArmless(((ServerLevel) p.level()).getServer());
+        broadcastStutter(((ServerLevel) p.level()).getServer());
         return count;
     }
 
@@ -1216,13 +1250,16 @@ public final class DiseaseManager {
                                                 st.weakSprintTicks = 0;
                                                 st.dropCooldown = 0;
                                             }
-                                            st.exposure = 0;
+                                            st.exposureWater = st.exposureTight = st.exposureHeight = st.exposureFlowers = st.exposureSun = 0;
                                             st.panicking = false;
                                             removeDiseaseEffects(target);
                                             syncAttributes(target, st);
                                             sync(target);
                                             if (d == Disease.NO_LEFT_HAND) {
                                                 broadcastArmless(((ServerLevel) target.level()).getServer());
+                                            }
+                                            if (d == Disease.STUTTER) {
+                                                broadcastStutter(((ServerLevel) target.level()).getServer());
                                             }
                                             if (self) {
                                                 ctx.getSource().sendSuccess(
@@ -1290,6 +1327,7 @@ public final class DiseaseManager {
     }
 
     private static void save(MinecraftServer server) {
+        STATES.values().removeIf(st -> st.diseases.isEmpty());
         try {
             JsonObject root = new JsonObject();
             root.addProperty("sinceReset", sinceReset);
