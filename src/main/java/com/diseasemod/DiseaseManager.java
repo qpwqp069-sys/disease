@@ -609,7 +609,9 @@ public final class DiseaseManager {
             sync(p);
         }
 
-        if (panicNow) {
+        boolean anyActive = water || tight || height || flowers || sun;
+
+        if (panicNow && anyActive) {
             p.displayClientMessage(
                     Component.literal("Паническая атака! Уйди отсюда!").withStyle(ChatFormatting.DARK_RED), true);
             String cause;
@@ -620,16 +622,6 @@ public final class DiseaseManager {
             } else if (height && st.exposureHeight >= PANIC_AFTER) {
                 cause = "panic_height";
             } else if (sun && st.exposureSun >= PANIC_AFTER) {
-                cause = "panic_sun";
-            } else if (flowers && st.exposureFlowers >= PANIC_AFTER) {
-                cause = "panic_flowers";
-            } else if (st.exposureWater >= PANIC_AFTER) {
-                cause = rainOnly ? "panic_rain" : "panic_water";
-            } else if (st.exposureTight >= PANIC_AFTER) {
-                cause = "panic_tight";
-            } else if (st.exposureHeight >= PANIC_AFTER) {
-                cause = "panic_height";
-            } else if (st.exposureSun >= PANIC_AFTER) {
                 cause = "panic_sun";
             } else {
                 cause = "panic_flowers";

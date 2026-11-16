@@ -18,10 +18,6 @@ public final class StutterTracker {
         return uuid != null && ids != null && ids.contains(uuid);
     }
 
-    public static boolean isStuttering(int entityId) {
-        return false;
-    }
-
     public static String stutter(String text) {
         if (text == null || text.isEmpty()) {
             return text == null ? "" : "";
@@ -55,6 +51,10 @@ public final class StutterTracker {
 
         // If message is TranslatableContents (vanilla chat format: chat.type.text, etc.)
         if (message.getContents() instanceof TranslatableContents tc) {
+            String key = tc.getKey();
+            if (!"chat.type.text".equals(key) && !"chat.type.text.narrate".equals(key)) {
+                return message;
+            }
             Object[] args = tc.getArgs();
             if (sender == null && args.length >= 1 && args[0] instanceof Component senderComp) {
                 String name = senderComp.getString();
