@@ -2,11 +2,11 @@
 
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.21.11-brightgreen.svg)](https://minecraft.net/)
 [![Fabric](https://img.shields.io/badge/Fabric-0.20.1+-blue.svg)](https://fabricmc.net/)
-[![Mod Version](https://img.shields.io/badge/Version-1.3.3_Bugfixes-orange.svg)](https://github.com/qpwqp069-sys/disease/releases/tag/v1.3.3)
+[![Mod Version](https://img.shields.io/badge/Version-1.3.4_Bugfixes-orange.svg)](https://github.com/qpwqp069-sys/disease/releases/tag/v1.3.4)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> 📥 **[Скачать готовый мод: diseaseRebalance-1.3.3.jar](https://github.com/qpwqp069-sys/disease/releases/download/v1.3.3/diseaseRebalance-1.3.3.jar)**  
-> 📦 **[Страница релиза v1.3.3](https://github.com/qpwqp069-sys/disease/releases/tag/v1.3.3)**
+> 📥 **[Скачать готовый мод: diseaseRebalance-1.3.4.jar](https://github.com/qpwqp069-sys/disease/releases/download/v1.3.4/diseaseRebalance-1.3.4.jar)**  
+> 📦 **[Страница релиза v1.3.4](https://github.com/qpwqp069-sys/disease/releases/tag/v1.3.4)**
 
 Независимый мод для **Minecraft 1.21.11 (Fabric)**, написанный с нуля.  
 Вдохновлён концепцией с канала ютубера **leafxup** (все игровые механики, сетевая синхронизация, звуковой движок и шейдерные эффекты разработаны полностью самостоятельно).

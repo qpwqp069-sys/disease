@@ -307,9 +307,7 @@ public class ModLogicTest {
 
         assertNotNull(Class.forName("com.diseasemod.client.mixin.ChatComponentMixin"),
                 "ChatComponentMixin class must be loadable");
-        Method stutterTextMethod = ChatComponentMixin.class.getMethod("stutterText", String.class);
-        assertTrue(Modifier.isStatic(stutterTextMethod.getModifiers()), "stutterText must be static");
-        assertNotNull(stutterTextMethod.invoke(null, "test text"));
+        assertNotNull(StutterTracker.stutter("test text"));
 
         assertNotNull(Class.forName("com.diseasemod.client.mixin.ChatListenerMixin"),
                 "ChatListenerMixin class must be loadable");

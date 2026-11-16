@@ -17,8 +17,4 @@ public class ChatComponentMixin {
             StutterTracker.currentSender = null;
         }
     }
-
-    public static String stutterText(String text) {
-        return StutterTracker.stutter(text);
-    }
 }
