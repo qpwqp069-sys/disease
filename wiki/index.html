@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Diseases Rebalance — вики мода для Minecraft 1.21.11 (Fabric)</title>
+  <meta name="description" content="Diseases Rebalance: каждые 6–8 минут игроки получают случайную болезнь из 38. Полный справочник болезней, установка, команды и скачивание.">
+  <meta property="og:title" content="Diseases Rebalance — история болезни вашего мира">
+  <meta property="og:description" content="38 болезней, которые накапливаются, переживают смерть и лечатся только зачарованным яблоком. Мод для Minecraft 1.21.11 (Fabric).">
+  <meta property="og:type" content="website">
+  <meta name="theme-color" content="#efe9dc">
+  <link rel="icon" href="assets/icon.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=IBM+Plex+Mono:wght@400;500;600&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=Prata&display=swap&subset=cyrillic" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="formhead">
+    <div class="formhead__inner">
+      <a class="formhead__brand" href="#top">
+        <img src="assets/icon.png" alt="" width="28" height="28">
+        <span>Diseases Rebalance</span>
+      </a>
+      <span class="formhead__form mono">Форма № 038/у · история болезни</span>
+      <nav class="formhead__nav" aria-label="Разделы">
+        <a href="#how">Механика</a>
+        <a href="#catalog">Болезни</a>
+        <a href="#pairs">Несовместимость</a>
+        <a href="#install">Установка</a>
+        <a href="#commands">Команды</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- ============ HERO ============ -->
+    <section class="hero">
+      <div class="hero__text">
+        <p class="eyebrow mono">Мод для Minecraft <span data-bind="minecraft">1.21.11</span> · Fabric</p>
+        <h1 class="hero__title">Каждые шесть&nbsp;— восемь минут<br>вы <em>чем-то</em> заболеваете.</h1>
+        <p class="hero__lead">
+          <strong>Diseases Rebalance</strong> выдаёт всем игрокам одновременно случайную болезнь из
+          <strong data-bind="count">38</strong>. Они копятся, не проходят после смерти, лечатся по одной
+          зачарованным золотым яблоком и отступают раз в пять игровых дней.
+        </p>
+
+        <div class="hero__actions">
+          <a class="stamp-btn" id="download" href="https://github.com/qpwqp069-sys/disease/releases" rel="noopener">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>
+            <span>Скачать <span class="mono" data-bind="jar">мод</span></span>
+          </a>
+          <a class="link-ink" id="release" href="https://github.com/qpwqp069-sys/disease/releases" rel="noopener">Страница релиза <span data-bind="vtag"></span></a>
+          <a class="link-ink" data-href="repo" href="https://github.com/qpwqp069-sys/disease" rel="noopener">Исходный код на GitHub</a>
+        </div>
+
+        <dl class="spec mono">
+          <div><dt>Minecraft</dt><dd data-bind="minecraft">1.21.11</dd></div>
+          <div><dt>Fabric Loader</dt><dd>≥ <span data-bind="loader">0.20.1</span></dd></div>
+          <div><dt>Fabric API</dt><dd>≥ <span data-bind="fabricApi">0.141.6</span></dd></div>
+          <div><dt>Java</dt><dd>21+</dd></div>
+          <div><dt>Версия мода</dt><dd data-bind="version">—</dd></div>
+        </dl>
+      </div>
+
+      <!-- Симулятор: карта пациента -->
+      <aside class="chart" aria-labelledby="chart-title">
+        <div class="chart__clip" aria-hidden="true"></div>
+        <header class="chart__head">
+          <h2 id="chart-title" class="mono">Карта пациента</h2>
+          <span class="chart__patient hand">Стив, 1.21.11</span>
+        </header>
+        <div class="chart__timer">
+          <span class="mono label">Следующий диагноз через</span>
+          <span class="chart__clock mono" id="sim-clock">—:—</span>
+        </div>
+        <ol class="chart__list" id="sim-list" aria-live="polite">
+          <li class="chart__empty hand">Пока здоров. Это ненадолго.</li>
+        </ol>
+        <p class="chart__log hand" id="sim-log" aria-live="polite"></p>
+        <div class="chart__buttons">
+          <button type="button" class="btn" id="sim-roll">Заболеть сейчас</button>
+          <button type="button" class="btn btn--ghost" id="sim-apple">Съесть зачарованное яблоко</button>
+          <button type="button" class="btn btn--ghost" id="sim-reset">Прошло 5 дней</button>
+        </div>
+        <p class="chart__note mono">Симулятор повторяет правила мода: таймер 6–8 мин и несовместимые пары.</p>
+      </aside>
+    </section>
+
+    <!-- ============ HOW ============ -->
+    <section class="how" id="how">
+      <h2 class="section-title"><span class="mono num">§1</span> Течение болезни</h2>
+      <ol class="timeline">
+        <li>
+          <span class="timeline__t mono">00:00</span>
+          <h3>Заражение</h3>
+          <p>Раз в 6–8 минут общий таймер срабатывает для всех на сервере сразу. Каждый получает случайную болезнь, совместимую с теми, что у него уже есть.</p>
+        </li>
+        <li>
+          <span class="timeline__t mono">+ n × 7 мин</span>
+          <h3>Накопление</h3>
+          <p>Болезни складываются. Смерть их не снимает: после возрождения всё на месте, включая атрибуты вроде роста и запаса здоровья.</p>
+        </li>
+        <li>
+          <span class="timeline__t mono">лечение</span>
+          <h3>Зачарованное золотое яблоко</h3>
+          <p>Когда вы доедаете яблоко, проходит одна случайная болезнь. Других лекарств нет, поэтому сундуки с добычей становятся аптекой.</p>
+        </li>
+        <li>
+          <span class="timeline__t mono">5 игровых дней</span>
+          <h3>Ремиссия</h3>
+          <p>Через 5 игровых дней (около 100 минут) болезни у всех игроков проходят разом. Таймер сброса виден в правом верхнем углу экрана.</p>
+        </li>
+      </ol>
+      <ul class="notes">
+        <li><strong>Умная пауза.</strong> Клиентские эффекты (тряска, судороги, головокружение) не мешают, пока открыт инвентарь, сундук или меню паузы.</li>
+        <li><strong>Креатив и наблюдатель</strong> защищены от эффектов болезней.</li>
+        <li><strong>HUD.</strong> Слева вверху список ваших болезней, справа таймеры. Новая болезнь появляется баннером по центру.</li>
+      </ul>
+    </section>
+
+    <!-- ============ CATALOG ============ -->
+    <section class="catalog" id="catalog">
+      <div class="catalog__head">
+        <h2 class="section-title"><span class="mono num">§2</span> Справочник болезней <span class="count mono" id="cat-count"></span></h2>
+        <div class="filters" role="search">
+          <label class="search">
+            <span class="visually-hidden">Поиск болезни</span>
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m15.5 15.5 5 5" stroke="currentColor" stroke-width="2"/></svg>
+            <input id="q" type="search" placeholder="Название, id или симптом" autocomplete="off">
+          </label>
+          <div class="chips" id="chips" role="group" aria-label="Категория"></div>
+          <label class="toggle">
+            <input type="checkbox" id="only-damage">
+            <span>Только с уроном</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="cards" id="cards" aria-live="polite">
+        <!-- скелеты до загрузки данных -->
+        <div class="card card--skeleton"></div><div class="card card--skeleton"></div><div class="card card--skeleton"></div>
+        <div class="card card--skeleton"></div><div class="card card--skeleton"></div><div class="card card--skeleton"></div>
+      </div>
+      <div class="empty" id="empty" hidden>
+        <p class="hand">Такого диагноза в справочнике нет.</p>
+        <button type="button" class="btn btn--ghost" id="clear-filters">Сбросить фильтры</button>
+      </div>
+      <div class="error" id="error" hidden role="alert">
+        <p><strong>Не удалось загрузить справочник.</strong> Обновите страницу. Полный список также есть в README репозитория.</p>
+      </div>
+    </section>
+
+    <!-- ============ PAIRS ============ -->
+    <section class="pairs" id="pairs">
+      <h2 class="section-title"><span class="mono num">§3</span> Противопоказания</h2>
+      <p class="section-lead">Эти болезни не выпадают одному игроку одновременно. Команда <code>/disease give</code> тоже откажет и объяснит причину.</p>
+      <ul class="rx" id="pair-list"></ul>
+    </section>
+
+    <!-- ============ INSTALL ============ -->
+    <section class="install" id="install">
+      <h2 class="section-title"><span class="mono num">§4</span> Установка</h2>
+      <ol class="steps">
+        <li>
+          <h3>Fabric Loader</h3>
+          <p>Установите <a href="https://fabricmc.net/use/installer/" rel="noopener">Fabric Loader</a> версии <span class="mono">≥ <span data-bind="loader">0.20.1</span></span> для Minecraft <span class="mono" data-bind="minecraft">1.21.11</span>.</p>
+        </li>
+        <li>
+          <h3>Fabric API</h3>
+          <p>Скачайте <a href="https://modrinth.com/mod/fabric-api/versions?g=1.21.11" rel="noopener">Fabric API</a> <span class="mono">≥ <span data-bind="fabricApi">0.141.6</span></span> и положите его в <code>.minecraft/mods/</code>.</p>
+        </li>
+        <li>
+          <h3>Сам мод</h3>
+          <p>Скачайте <a id="download-2" href="https://github.com/qpwqp069-sys/disease/releases" rel="noopener"><span class="mono" data-bind="jar">jar</span></a> и положите туда же.</p>
+        </li>
+        <li>
+          <h3>Сервер и все игроки</h3>
+          <p>Для игры по сети или LAN мод нужен <strong>и на сервере, и у каждого игрока</strong>: часть симптомов (заикание, алексия, глухота, судороги) работает на клиенте.</p>
+        </li>
+      </ol>
+
+      <details class="build">
+        <summary>Сборка из исходников</summary>
+        <pre class="code"><code># Linux / macOS
+git clone https://github.com/qpwqp069-sys/disease.git
+cd disease
+./gradlew clean build
+
+# Windows (PowerShell)
+.\gradlew.bat clean build --no-daemon
+
+# Готовый файл:
+build/libs/<span data-bind="jar">diseaseRebalance.jar</span></code></pre>
+      </details>
+    </section>
+
+    <!-- ============ COMMANDS ============ -->
+    <section class="commands" id="commands">
+      <h2 class="section-title"><span class="mono num">§5</span> Команды</h2>
+      <p class="section-lead">Все команды поддерживают автодополнение по <kbd>Tab</kbd>. Болезнь можно указать по id (<code>blindness</code>) или по названию (<code>Слепота</code>).</p>
+      <table class="cmd">
+        <thead><tr><th scope="col">Команда</th><th scope="col">Что делает</th><th scope="col">Доступ</th></tr></thead>
+        <tbody>
+          <tr><td><code>/disease list</code></td><td>Все болезни мода, отмечены те, что есть у вас</td><td><span class="tag">все</span></td></tr>
+          <tr><td><code>/disease info &lt;болезнь&gt;</code></td><td>Подробная механика болезни</td><td><span class="tag">все</span></td></tr>
+          <tr><td><code>/disease give &lt;болезнь | all&gt; [игрок]</code></td><td>Выдать болезнь или все совместимые сразу</td><td><span class="tag tag--op">оператор</span></td></tr>
+          <tr><td><code>/disease take &lt;болезнь&gt; [игрок]</code></td><td>Снять одну болезнь</td><td><span class="tag tag--op">оператор</span></td></tr>
+          <tr><td><code>/disease clear [игрок]</code></td><td>Снять все болезни</td><td><span class="tag tag--op">оператор</span></td></tr>
+          <tr><td><code>/disease random [игрок]</code></td><td>Выдать одну случайную совместимую болезнь</td><td><span class="tag tag--op">оператор</span></td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="foot__inner">
+      <p>Исходный код под лицензией <a data-href="license" href="https://github.com/qpwqp069-sys/disease/blob/main/LICENSE" rel="noopener">MIT</a> © 2026 qpwqp. Звуки икоты и сердцебиения распространяются под CC0.</p>
+      <p>Вдохновлено идеей с канала leafxup. Механики, сетевая синхронизация и эффекты написаны с нуля.</p>
+      <p class="mono foot__gen">Справочник собран из исходников мода <span id="generated"></span></p>
+    </div>
+  </footer>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
